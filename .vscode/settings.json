@@ -1,0 +1,43 @@
+{
+    "C_Cpp.intelliSenseEngine": "default",
+    "C_Cpp.default.compilerPath": "/usr/bin/arm-none-eabi-gcc",
+    "C_Cpp.default.intelliSenseMode": "linux-gcc-arm",
+    "C_Cpp.default.compileCommands": [
+        "${workspaceFolder}/build/Debug/compile_commands.json"
+    ],
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/Core/Inc",
+        "${workspaceFolder}/module/inc",
+        "${workspaceFolder}/Drivers/STM32F1xx_HAL_Driver/Inc",
+        "${workspaceFolder}/Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
+        "${workspaceFolder}/Drivers/CMSIS/Device/ST/STM32F1xx/Include",
+        "${workspaceFolder}/Drivers/CMSIS/Include"
+    ],
+    "C_Cpp.default.defines": [
+        "USE_HAL_DRIVER",
+        "STM32F103xB"
+    ],
+    "C_Cpp.default.cStandard": "c11",
+    "C_Cpp.default.browse.path": [
+        "${workspaceFolder}/Core",
+        "${workspaceFolder}/module",
+        "${workspaceFolder}/Drivers"
+    ],
+    "C_Cpp.default.browse.limitSymbolsToIncludedHeaders": true,
+    "C_Cpp.intelliSenseMemoryLimit": 512,
+    "C_Cpp.files.exclude": {
+        "**/build/**": true
+    },
+    "files.watcherExclude": {
+        "**/build/**": true,
+        "**/.git/objects/**": true
+    },
+    "search.exclude": {
+        "**/build/**": true
+    },
+    "python.analysis.languageServerMode": "light",
+    "python.analysis.indexing": false,
+    "cmake.configureOnOpen": false,
+    "cmake.configureOnEdit": false,
+    "cmake.useCMakePresets": "always"
+}

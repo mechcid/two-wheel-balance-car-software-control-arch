@@ -1,0 +1,24 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "STM32: 编译并调试 (ST-Link)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "openocd",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/Debug/balance_car.elf",
+            "device": "STM32F103C8",
+            "interface": "swd",
+            "configFiles": [
+                "interface/stlink.cfg",
+                "target/stm32f1x.cfg"
+            ],
+            "gdbPath": "/usr/bin/gdb-multiarch",
+            "serverpath": "/usr/bin/openocd",
+            "armToolchainPath": "/usr/bin",
+            "runToEntryPoint": "main",
+            "preLaunchTask": "STM32: 编译 Debug"
+        }
+    ]
+}
