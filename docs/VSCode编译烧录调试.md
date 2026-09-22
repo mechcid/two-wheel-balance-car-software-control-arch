@@ -74,7 +74,7 @@ GDB 用 ELF 中的调试符号把机器地址对应到源码行和变量，OpenO
 
 | 配置 | 当前值/作用 |
 |---|---|
-| `compilerPath` | `/usr/bin/arm-none-eabi-gcc`；让扩展查询 ARM 编译器的系统头文件路径和预定义宏 |
+| `compilerPath` | `/usr/bin/arm-none-eabi-g++`；为未加入构建的新 C++ 文件查询 ARM C++ 标准库路径和预定义宏 |
 | `intelliSenseMode` | `linux-gcc-arm`；指定目标架构对应的解析模式，不能把 STM32 当电脑的 x86 程序理解 |
 | `compileCommands` | 指向 `build/Debug/compile_commands.json`；按每个源文件的真实编译命令配置解析 |
 | `includePath` | 列出 `Core/Inc`、`module/inc`、HAL、CMSIS；作为基础配置中的头文件搜索目录 |
@@ -99,6 +99,12 @@ C/C++ 扩展 → 解析 #include、条件编译和类型 → 补全、诊断、�
 一些教程使用 `.vscode/c_cpp_properties.json`。它是 C/C++ 扩展专用的配置文件；**本工程用 settings.json 中的 `C_Cpp.default.*` 和编译数据库完成配置，所以目前不需要额外建立第五个 JSON**。如果以后新增该文件，其中显式配置的字段可能覆盖相应默认值，维护时要避免两处不一致。相关优先关系见 [C/C++ 官方配置说明](https://code.visualstudio.com/docs/cpp/customize-cpp-settings)。
 
 作用范围也要区分：项目的 `.vscode/settings.json` 随项目保存；Linux 用户设置通常在 `~/.config/Code/User/settings.json`，会影响多个项目。本项目的头文件路径写在项目配置里。之前为内存问题调整过用户级设置，历史说明见 [VSCode内存问题.md](VSCode内存问题.md)。同一可覆盖设置通常由更具体的工作区/文件夹配置覆盖用户默认值，参见 [VSCode 设置作用范围](https://code.visualstudio.com/docs/configure/settings)。
+
+### 新增 C++ 模块的编辑器配置（2026-09-21）
+
+电机相关 `.hpp` 暂未接入 CMake，没有对应源文件的编译数据库记录，因此补齐基础解析配置：默认编译器使用 `arm-none-eabi-g++`，目标参数为 `-mcpu=cortex-m3 -mthumb`，C++ 标准为 C++17，并明确将 `.hpp/.cpp` 识别为 C++。C 标准仍为 C11；已有 C 文件继续优先使用编译数据库中的实际 GCC 命令。这不会将现有 C 固件改为 C++ 构建。
+
+已使用这些基础配置对五个电机相关头文件执行 ARM C++17 语法检查，通过。尚未在 VSCode 窗口核对红线是否全部消失；若仍显示旧诊断，可执行命令面板中的 `C/C++: Reset IntelliSense Database`，必要时再执行 `Developer: Reload Window`。没有关闭错误提示或手工添加本机 x86 标准库目录。
 
 ### 3.2 tasks.json：把操作命令变成菜单和快捷键
 

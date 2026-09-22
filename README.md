@@ -44,8 +44,14 @@ OLED 显示三轴加速度，`1000 mg = 1 g`；使用 ±2g 档，换算为 `raw 
 命令须以 CRLF 结尾：`@ping`、`@status`、`@stream:0` / `@stream:1`。
 `@status` 包含修正样本有效性、OLED、MPU 和 UART 状态。原始数据诊断不再作为普通交互命令；底层尾字节保护仍保留，原因见 [I²C 尾字节诊断](docs/i2c_tail_diagnostic.md)。
 
+## 电机控制接入
+
+已接入两轮电机应用、10 ms 调度与串口命令，驱动为 TB6612，每输出轴圈 1456 计数。
+接线配置集中在 `Core/Inc/motor_board_config.h`；当前 `MOTOR_BOARD_READY=1`，上电默认停止。已实测确认 A=PB1/PWM2/编码器1，B=PB0/PWM1/编码器2；开环上限 ±40%，速度闭环尚未解锁。
+详见 [电机控制接入说明](docs/电机控制接入说明.md)。默认停止、可选开环或 PID 速度闭环，尚未实现整车平衡。
+
 ## CubeMX 再生成
 
 本次对齐了 I2C2 的 `.ioc`、`i2c.c/.h`、`main.c` 调用与应用层句柄。
-`.ioc` 还包含 TIM1/TIM4 编码器、TIM3 PWM 等配置，当前 Core 尚未完整生成这些功能，**当前固件没有实现电机控制**。
+`.ioc` 中 TIM1/TIM4 编码器、TIM3 PWM 尚未通过 CubeMX 完整生成；电机板级初始化暂由手写 `Core/Src/motor_board.c` 负责，当前已启用。再生成时需避免与 tim.c 重复初始化。
 今后用 CubeMX 再生成时，确认 PB10/PB11=I2C2、USART2=PA2/PA3、USART2 中断和 9600 波特率，并检查 `main` 用户区的 模块初始化和 `Scheduler_Run`、UART 回调和 IRQ 是否保留。此次没有通过 CubeMX GUI 完整再生成工程。

@@ -29,6 +29,8 @@
 #include "display_app.h"
 #include "telemetry_app.h"
 #include "oled.h"
+#include "motor_app.h"
+#include "motor_board.h"
 
 /* USER CODE END Includes */
 
@@ -61,6 +63,11 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static void motor_task(void *context)
+{
+  (void)context;
+  MotorApp_Update(HAL_GetTick());
+}
 static void sample_task(void *context)
 {
   (void)context;
@@ -87,15 +94,16 @@ static void oled_task(void *context) { (void)context; DisplayApp_Poll(); }
 static void sensor_retry_task(void *context)
 {
   (void)context;
-  if (!SensorApp_GetStatus()->ready) SensorApp_Reconnect();
+  if (!MotorApp_IsActive() && !SensorApp_GetStatus()->ready) SensorApp_Reconnect();
 }
 static void oled_retry_task(void *context)
 {
-  if (!OLED_IsReady()) DisplayApp_Init(context);
+  if (!MotorApp_IsActive() && !OLED_IsReady()) DisplayApp_Init(context);
 }
 /* 应用任务的周期统一在此配置；周期为 0 表示每轮主循环都执行。
  * 故障恢复目前会阻塞等待 MPU 复位和稳定，因此不保证硬实时性。 */
 static SchedulerTask tasks[] = {
+  {.function=motor_task,        .period_ms=10,   .enabled=true},
   {.function=sample_task,       .period_ms=10,   .enabled=true},
   {.function=uart_task,         .period_ms=0,    .enabled=true},
   {.function=display_task,      .period_ms=200,  .enabled=true},
@@ -144,6 +152,7 @@ int main(void)
   if (!TelemetryApp_Init(&huart2)) Error_Handler();
   SensorApp_Init(&hi2c2);
   DisplayApp_Init(&hi2c2);
+  MotorApp_Init(MotorBoard_Init(), HAL_GetTick());
   Scheduler_Init(tasks, TASK_COUNT, HAL_GetTick());
 
   /* USER CODE END 2 */

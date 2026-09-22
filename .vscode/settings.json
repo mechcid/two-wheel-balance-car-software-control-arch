@@ -1,6 +1,6 @@
 {
     "C_Cpp.intelliSenseEngine": "default",
-    "C_Cpp.default.compilerPath": "/usr/bin/arm-none-eabi-gcc",
+    "C_Cpp.default.compilerPath": "/usr/bin/arm-none-eabi-g++",
     "C_Cpp.default.intelliSenseMode": "linux-gcc-arm",
     "C_Cpp.default.compileCommands": [
         "${workspaceFolder}/build/Debug/compile_commands.json"
@@ -39,5 +39,14 @@
     "python.analysis.indexing": false,
     "cmake.configureOnOpen": false,
     "cmake.configureOnEdit": false,
-    "cmake.useCMakePresets": "always"
+    "cmake.useCMakePresets": "always",
+    "C_Cpp.default.compilerArgs": [
+        "-mcpu=cortex-m3",
+        "-mthumb"
+    ],
+    "C_Cpp.default.cppStandard": "c++17",
+    "files.associations": {
+        "*.hpp": "cpp",
+        "*.cpp": "cpp"
+    }
 }

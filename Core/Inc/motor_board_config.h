@@ -1,0 +1,46 @@
+#ifndef MOTOR_BOARD_CONFIG_H
+#define MOTOR_BOARD_CONFIG_H
+
+/* 这里只填写板级映射；具备测试所需接线后再将 READY 改为 1。
+ * 未配置时固件报告 UNCONFIGURED，拒绝电机启动命令。
+ * .ioc 已知：PWM 为 PB0/TIM3_CH3、PB1/TIM3_CH4；
+ * 实测绑定：软件 L=A 路/PWM2/编码器1，R=B 路/PWM1/编码器2。
+ * L/R 暂为软件名称，不代表已确认车体左右或前进方向。 */
+#define MOTOR_BOARD_READY 1
+#define MOTOR_GEAR_RATIO 28u
+#define MOTOR_ENCODER_LINES 13u
+#define MOTOR_ENCODER_MULTIPLIER 4u
+#define MOTOR_COUNTS_PER_REV (MOTOR_GEAR_RATIO * MOTOR_ENCODER_LINES * MOTOR_ENCODER_MULTIPLIER)
+
+#define MOTOR_LEFT_IN1_PORT GPIOB
+#define MOTOR_LEFT_IN1_PIN GPIO_PIN_3
+#define MOTOR_LEFT_IN2_PORT GPIOB
+#define MOTOR_LEFT_IN2_PIN GPIO_PIN_4
+#define MOTOR_RIGHT_IN1_PORT GPIOA
+#define MOTOR_RIGHT_IN1_PIN GPIO_PIN_12
+#define MOTOR_RIGHT_IN2_PORT GPIOA
+#define MOTOR_RIGHT_IN2_PIN GPIO_PIN_11
+#define MOTOR_STBY_PORT GPIOA
+#define MOTOR_STBY_PIN GPIO_PIN_15
+#define MOTOR_LEFT_PWM_CHANNEL 4u  /* A 路实测对应 PB1/PWM2。 */
+#define MOTOR_RIGHT_PWM_CHANNEL 3u
+#define MOTOR_LEFT_ENCODER_TIMER TIM1 /* 填 TIM1 或 TIM4。 */
+#define MOTOR_RIGHT_ENCODER_TIMER TIM4
+#define MOTOR_LEFT_OUTPUT_REVERSED false
+#define MOTOR_RIGHT_OUTPUT_REVERSED false
+#define MOTOR_LEFT_ENCODER_REVERSED true /* 让正占空比对应正转速。 */
+#define MOTOR_RIGHT_ENCODER_REVERSED false
+
+/* 先开环检查反馈方向，再整定 PI。禁止把零参数当作可用的闭环参数。 */
+#define MOTOR_SPEED_CONTROL_ALLOWED false
+#define MOTOR_INCREMENTAL_PID false
+#define MOTOR_LEFT_KP 0.0f
+#define MOTOR_LEFT_KI 0.0f
+#define MOTOR_LEFT_KD 0.0f
+#define MOTOR_RIGHT_KP 0.0f
+#define MOTOR_RIGHT_KI 0.0f
+#define MOTOR_RIGHT_KD 0.0f
+#define MOTOR_DUTY_LIMIT 0.40f /* 当前单轮短脉冲测试上限。 */
+#define MOTOR_RPM_LIMIT 120.0f /* 初始软件上限，不代表电机额定参数。 */
+#define MOTOR_PWM_HZ 20000u
+#endif
