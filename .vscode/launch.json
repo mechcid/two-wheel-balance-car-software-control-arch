@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "STM32: 编译并调试 (ST-Link)",
+            "name": "STM32: 编译并调试 (CMSIS-DAP)",
             "type": "cortex-debug",
             "request": "launch",
             "servertype": "openocd",
@@ -11,8 +11,7 @@
             "device": "STM32F103C8",
             "interface": "swd",
             "configFiles": [
-                "interface/stlink.cfg",
-                "target/stm32f1x.cfg"
+                "${workspaceFolder}/.vscode/openocd.cfg"
             ],
             "gdbPath": "/usr/bin/gdb-multiarch",
             "serverpath": "/usr/bin/openocd",

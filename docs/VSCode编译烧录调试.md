@@ -1,6 +1,6 @@
 # VSCode 中编译、烧录、调试 STM32
 
-日期：2026-09-20。适用：本机 Linux、STM32F103C8T6、ST-Link、当前工程。
+更新：2026-09-29。适用：本机 Linux、STM32F103C8T6、CMSIS-DAP、当前工程。
 
 ## 1. 直接怎么用
 
@@ -10,16 +10,16 @@
 |---|---|---|
 | 编译并烧录运行 | **Ctrl+Shift+B**，或“终端 → 运行生成任务” | 配置、编译、烧录、校验、复位运行 |
 | 只编译 | “终端 → 运行任务 → STM32: 编译 Debug” | 不操作板卡，生成 ELF/BIN |
-| 启动调试 | 左侧“运行和调试”选择 `STM32: 编译并调试 (ST-Link)`，点绿色三角或 **F5** | 先编译，再烧录，停在 main |
+| 启动调试 | 左侧“运行和调试”选择 `STM32: 编译并调试 (CMSIS-DAP)`，点绿色三角或 **F5** | 先编译，再烧录，停在 main |
 | 继续执行 | 调试时 F5 | 运行到下一个断点 |
 | 单步越过 / 进入函数 | F10 / F11 | 查看下一步运行结果 |
 | 停止调试 | Shift+F5 / 红色停止按钮 | 结束调试会话；要确保独立运行可重新执行编译并烧录任务 |
 
-**本工程的 Ctrl+Shift+B 会写入板卡 Flash**，不仅是编译。没有连接 ST-Link 时请选“只编译”任务。
+**本工程的 Ctrl+Shift+B 会写入板卡 Flash**，不仅是编译。没有连接 CMSIS-DAP 时请选“只编译”任务。
 
 开始调试后点击代码行号左边设置断点。例如在 `module/src/sensor_app.c` 的 `status.reads++` 处停住，展开变量查看 `corrected_sample.ax_g/ay_g/az_g`。先按 F5 走过 `main` 的启动断点，OLED 才会初始化；CPU 停住时屏幕数字停止更新是正常的。
 
-编译错误会出现在“问题”面板与任务终端；遇到失败请修复后重试，不要选择用旧固件继续调试。结束一个调试会话后再烧录，避免两个程序同时占用 ST-Link。
+编译错误会出现在“问题”面板与任务终端；遇到失败请修复后重试，不要选择用旧固件继续调试。结束一个调试会话后再烧录，避免两个程序同时占用 CMSIS-DAP。
 
 ## 2. 一键操作背后发生了什么
 
@@ -31,7 +31,7 @@
    ↓ 链接：按 STM32F103XX_FLASH.ld 放置 Flash、RAM、向量表等
 balance_car.elf（机器码 + 地址 + Debug 符号）
    ├─ objcopy → balance_car.bin（裸二进制）
-   └─ OpenOCD → ST-Link → SWD → STM32 Flash，校验后复位
+   └─ OpenOCD → CMSIS-DAP → SWD → STM32 Flash，校验后复位
 ```
 
 VSCode 是编辑与操作入口，CMake 管理构建，GCC 生成 ARM 指令，OpenOCD 控制调试器。仅配置 IntelliSense 不会自动产生可烧录的程序；仅安装 C/C++ 扩展也不会代替交叉编译器。
@@ -43,7 +43,7 @@ VSCode 运行和调试界面
    ↕ Cortex-Debug 扩展
 GDB（本机 gdb-multiarch）
    ↕ 本机调试服务连接
-OpenOCD ↔ ST-Link ↔ STM32
+OpenOCD ↔ CMSIS-DAP ↔ STM32
 ```
 
 GDB 用 ELF 中的调试符号把机器地址对应到源码行和变量，OpenOCD 负责实际暂停 CPU、设置硬件断点、读写内存。程序运行在 STM32 上，而不是电脑上。Debug 用 `-O0 -g3` 便于逐行调试；Release 用 `-Os -g0` 缩小体积，不适合作为本配置的源码调试目标。
@@ -53,7 +53,7 @@ GDB 用 ELF 中的调试符号把机器地址对应到源码行和变量，OpenO
 | 文件 | 本次作用 |
 |---|---|
 | `.vscode/tasks.json` | 三个任务：配置 Debug、编译 Debug、编译并烧录；以 dependsOn 串联；最后一个是默认生成任务 |
-| `.vscode/launch.json` | Cortex-Debug + OpenOCD + ST-Link；指定 ELF、GDB、芯片、SWD 和停在 main；preLaunchTask 先编译 |
+| `.vscode/launch.json` | Cortex-Debug + OpenOCD + CMSIS-DAP；指定 ELF、GDB、芯片、SWD 和停在 main；preLaunchTask 先编译 |
 | `.vscode/settings.json` | 把旧 UART 索引路径迁移到 module，继续使用真实 ARM 编译数据库；保持内存限制与关闭自动配置 |
 | `.vscode/extensions.json` | 推荐 C/C++、CMake Tools、Cortex-Debug 三个扩展 |
 | `CMakeLists.txt` | 登记 module/src 的模块实现文件，添加 module/inc，保持 ELF 转 BIN |
@@ -137,7 +137,7 @@ STM32: 编译并烧录
 | `request: launch` | 发起固件启动调试流程 |
 | `executable` | 指向 Debug ELF；调试器从中获得机器码和源码/变量符号 |
 | `servertype`、`serverpath` | 启动本机 OpenOCD 调试服务 |
-| `configFiles` | 选择 ST-Link 接口配置和 STM32F1 芯片配置 |
+| `configFiles` | 加载项目共用的 `.vscode/openocd.cfg`，选择 CMSIS-DAP、STM32F1、SWD 和 100 kHz |
 | `gdbPath`、`armToolchainPath` | 指定 GDB 和 ARM 辅助工具的位置 |
 | `device`、`interface` | 标识 STM32F103C8 与 SWD；OpenOCD 的目标配置由上述 configFiles 提供 |
 | `preLaunchTask` | 引用 tasks.json 中的“STM32: 编译 Debug”，确保调试前先构建 |
@@ -166,7 +166,7 @@ F5 的便利来自 `launch.json` 与 `tasks.json` 的配合。这里的“跳到
 | 新加 .c 没有参与编译 | CMakeLists.txt 的 target_sources，随后重新配置 |
 | 修改 Ctrl+Shift+B 执行的动作 | tasks.json 中哪个任务被设为默认 build 任务 |
 | 修改烧录命令或参数 | tasks.json 中“编译并烧录”的 command/args |
-| F5 找不到 ELF/GDB/OpenOCD 或无法连板 | launch.json 的路径与目标配置、前置编译任务、ST-Link 连接 |
+| F5 找不到 ELF/GDB/OpenOCD 或无法连板 | launch.json 的路径与目标配置、前置编译任务、CMSIS-DAP 连接 |
 | 换电脑后不知道该装什么扩展 | extensions.json；再单独安装系统工具链并修正路径 |
 
 简记：**settings 管编辑体验，tasks 管执行命令，launch 管调试会话，extensions 管扩展推荐；CMake 管真实的构建规则。**
@@ -177,7 +177,7 @@ F5 的便利来自 `launch.json` 与 `tasks.json` 的配合。这里的“跳到
 
 调试配置明确使用 `/usr/bin/gdb-multiarch`、`/usr/bin/openocd` 和 `/usr/bin` 下的 ARM 工具。工程路径使用 `${workspaceFolder}`；复制到 Windows 时需要替换这些 Linux 工具路径。硬件和源码逻辑相同，操作系统上的工具位置和 USB 权限不同。
 
-OpenOCD 配置来自安装包：`interface/stlink.cfg`、`target/stm32f1x.cfg`。本机普通用户权限下已成功访问 ST-Link；Codex 测试时的授权是运行沙箱的设备/连接访问限制，不代表 VSCode 任务需要 sudo。不要用 sudo 启动 VSCode。
+下载和调试共用 `.vscode/openocd.cfg`，内部加载安装包的 `interface/cmsis-dap.cfg`、`target/stm32f1x.cfg`，显式选择 SWD，并在目标配置之后设置 100 kHz。以后调整速度只需修改这一处。本机普通用户权限下已成功访问 CMSIS-DAP；Codex 测试时的授权是运行沙箱的设备/连接访问限制，不代表 VSCode 任务需要 sudo。不要用 sudo 启动 VSCode。
 
 ## 5. 等价命令：便于理解与排错
 
@@ -186,7 +186,7 @@ OpenOCD 配置来自安装包：`interface/stlink.cfg`、`target/stm32f1x.cfg`�
 ```bash
 cmake --preset Debug
 cmake --build --preset Debug --parallel 2
-openocd -f interface/stlink.cfg -f target/stm32f1x.cfg \
+openocd -f .vscode/openocd.cfg \
   -c 'program build/Debug/balance_car.elf verify reset exit'
 ```
 
@@ -194,13 +194,12 @@ openocd -f interface/stlink.cfg -f target/stm32f1x.cfg \
 
 ## 6. 已验证与边界
 
-- Debug、Release 编译通过；完成源码迁移后的完整重新构建。
-- ST-Link 烧录 Debug 成功，OpenOCD 返回 `Verified OK`。
-- GDB 已实际连接板卡，命中 `main` 临时断点并读取源代码位置，再恢复运行。
-- 读取到 OLED 正常传输、MPU 成功采样；用户确认屏幕数字随倾斜变化。
-- 已核对当前安装的 Cortex-Debug 配置字段及任务依赖；**尚未在 VSCode 窗口亲自点击 F5/Ctrl+Shift+B**，底层等价链路已实测通过。
+- 本次配置切换后，CMake 配置与 Debug 构建通过，共用的 `.vscode/openocd.cfg` 实机识别到 Cortex-M3，SWD 100 kHz。
+- 同日此前已通过相同 DAP/SWD 参数完成 Debug 下载与校验（Verified OK），GDB 命中 SensorApp_Update 临时硬件断点，并完成单步与变量读取；详见 [DAP 下载调试验证](DAP下载调试验证.md)。
+- 本次没有在 VSCode 窗口亲自点击 F5/Ctrl+Shift+B；验证的是配置文件和底层工具链。F5 的 runToEntryPoint 仍为 main。
+- 电机停止时再调试；CPU 暂停期间软件超时保护不能执行。暂停可能扰乱传感器通信，结束测试后应复位并确认采集恢复。
 
-如果构建成功但烧录失败，先看任务终端是否能发现 ST-Link；如果 F5 启动后屏幕不动，先看是否正停在断点；如果“找不到 ELF”，先确认打开的是项目根目录并执行编译任务。
+如果构建成功但烧录失败，先看任务终端是否能发现 CMSIS-DAP；如果 F5 启动后屏幕不动，先看是否正停在断点；如果“找不到 ELF”，先确认打开的是项目根目录并执行编译任务。
 
 ## 7. 配置依据
 

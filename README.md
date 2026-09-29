@@ -6,7 +6,7 @@ STM32F103C8T6 + MPU6050 + SSD1306 OLED，使用硬件 I2C2，并通过 USART2/HC
 
 在 VSCode 中打开**本项目文件夹**：
 
-- **Ctrl+Shift+B**：自动配置 → 编译 Debug → ST-Link 烧录 → 校验 → 复位运行。
+- **Ctrl+Shift+B**：自动配置 → 编译 Debug → CMSIS-DAP 烧录 → 校验 → 复位运行。
 - **F5**：自动编译 → 烧录并启动断点调试 → 停在 `main`；再按 F5 继续运行。
 - 只编译、不连接硬件：菜单“终端 → 运行任务 → STM32: 编译 Debug”。
 
@@ -34,7 +34,7 @@ build/Debug、Release/  自动生成的编译产物，可删除后重新构建
 | MPU6050 | PB10=SCL、PB11=SDA，I2C2 100 kHz，实测地址 0x68 |
 | SSD1306 128×64 OLED | 同一 I2C2，总线实测地址 0x3C（驱动也探测 0x3D） |
 | HC-05 | USART2 PA2=TX、PA3=RX，9600 / 8N1，共地 |
-| ST-Link | SWDIO、SWCLK、GND 与板卡相连，板卡正常供电 |
+| CMSIS-DAP | SWDIO、SWCLK、GND 与板卡相连，板卡正常供电 |
 
 OLED 显示三轴加速度，`1000 mg = 1 g`；使用 ±2g 档，换算为 `raw × 1000 / 16384`，未添加零偏校准。
 
@@ -55,3 +55,5 @@ OLED 显示三轴加速度，`1000 mg = 1 g`；使用 ±2g 档，换算为 `raw 
 本次对齐了 I2C2 的 `.ioc`、`i2c.c/.h`、`main.c` 调用与应用层句柄。
 `.ioc` 中 TIM1/TIM4 编码器、TIM3 PWM 尚未通过 CubeMX 完整生成；电机板级初始化暂由手写 `Core/Src/motor_board.c` 负责，当前已启用。再生成时需避免与 tim.c 重复初始化。
 今后用 CubeMX 再生成时，确认 PB10/PB11=I2C2、USART2=PA2/PA3、USART2 中断和 9600 波特率，并检查 `main` 用户区的 模块初始化和 `Scheduler_Run`、UART 回调和 IRQ 是否保留。此次没有通过 CubeMX GUI 完整再生成工程。
+
+默认下载与调试使用 `.vscode/openocd.cfg`：CMSIS-DAP、SWD、100 kHz。无线使用时电脑端为主机、板端接收器连接 SWD 并供电；有线使用时将设备切到有线模式。验证记录见 [DAP 下载调试验证](docs/DAP下载调试验证.md)。

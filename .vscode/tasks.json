@@ -40,9 +40,7 @@
             "command": "openocd",
             "args": [
                 "-f",
-                "interface/stlink.cfg",
-                "-f",
-                "target/stm32f1x.cfg",
+                "${workspaceFolder}/.vscode/openocd.cfg",
                 "-c",
                 "program \"${workspaceFolder}/build/Debug/balance_car.elf\" verify reset exit"
             ],
