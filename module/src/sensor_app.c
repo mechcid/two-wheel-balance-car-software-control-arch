@@ -9,8 +9,10 @@ static SensorSample corrected_sample;
 static SensorStatus status;
 static SensorCalibration calibration;
 
-bool SensorApp_SetCalibration(const SensorCalibration *value)
-{
+//定义放缩倍数和零点偏移，主要在检查输入的值是否合法，合法了才会更新校准参数。起校准作用
+//主要是给外部调用用的，在保持calibration为当前文件私有的同时提供一个外部更新的接口，用于需要动态校准的场景
+bool SensorApp_SetCalibration(const SensorCalibration *value){
+    //如果没有系数传入就恢复默认参数，零偏为 0、比例为 1
     if (!value) {
         calibration = (SensorCalibration){.accel_scale = {1,1,1}, .gyro_scale = {1,1,1}};
         return true;
@@ -27,8 +29,7 @@ bool SensorApp_SetCalibration(const SensorCalibration *value)
     calibration = *value;
     return true;
 }
-static void capture_status(HAL_StatusTypeDef result)
-{
+static void capture_status(HAL_StatusTypeDef result){
     status.ready = device.ready != 0;
     status.address = device.address;
     status.who_am_i = device.who_am_i;
@@ -41,20 +42,20 @@ HAL_StatusTypeDef SensorApp_Reconnect(void)
     capture_status(result);
     return result;
 }
-HAL_StatusTypeDef SensorApp_Init(I2C_HandleTypeDef *bus)
+HAL_StatusTypeDef SensorApp_Init(I2C_HandleTypeDef *bus, const SensorCalibration *initial_calibration)
 {
+    /* 先检查并复制配置，非法参数不清空已有样本，也不启动硬件初始化。 */
+    if (!bus || !SensorApp_SetCalibration(initial_calibration)) return HAL_ERROR;
     sensor_bus = bus;
     device = (MPU6050){0};
     raw_sample = (MPU6050_Sample){0};
     corrected_sample = (SensorSample){0};
     status = (SensorStatus){0};
-    SensorApp_SetCalibration(NULL);
     return SensorApp_Reconnect();
 }
 /* 换算系数对应底层驱动配置的 ±2 g、±250 度/秒量程。
  * 物理量校准统一在此完成，显示和遥测模块只使用修正结果。 */
-static SensorSample correct(const MPU6050_Sample *raw, uint32_t now_ms)
-{
+static SensorSample correct(const MPU6050_Sample *raw, uint32_t now_ms){
     const int16_t accel[] = {raw->ax, raw->ay, raw->az};
     const int16_t gyro[] = {raw->gx, raw->gy, raw->gz};
     float a[3], g[3];

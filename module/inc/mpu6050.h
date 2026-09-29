@@ -2,6 +2,7 @@
 #define MPU6050_H
 #include "main.h"
 
+//储存一个MPU6050传感器的状态和配置，包括I2C总线、设备地址、WHO_AM_I寄存器值、初始化状态和错误码。
 typedef struct {
     I2C_HandleTypeDef *bus;
     uint8_t address, who_am_i, ready;

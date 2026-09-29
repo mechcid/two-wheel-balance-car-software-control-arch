@@ -2,14 +2,12 @@
 #include "oled.h"
 #include <stdio.h>
 
-HAL_StatusTypeDef DisplayApp_Init(I2C_HandleTypeDef *bus)
-{
+HAL_StatusTypeDef DisplayApp_Init(I2C_HandleTypeDef *bus){
     HAL_StatusTypeDef result = OLED_Init(bus);
     if (result == HAL_OK) OLED_ShowString(1, 1, "MPU6050 / mg    ");
     return result;
 }
-void DisplayApp_Render(const SensorSample *sample, bool available)
-{
+void DisplayApp_Render(const SensorSample *sample, bool available){
     if (!OLED_IsReady()) return;
     if (!sample || !sample->valid || !available) {
         OLED_ShowString(2, 1, "MPU waiting...  ");

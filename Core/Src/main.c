@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "i2c.h"
+#include "tim.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -114,6 +115,14 @@ static SchedulerTask tasks[] = {
 };
 #define TASK_COUNT (sizeof(tasks) / sizeof(tasks[0]))
 
+//定义MPU的零点偏移和缩放倍数
+static SensorCalibration calibration = {
+  .accel_bias_g = {0, 0, 0},
+  .accel_scale = {1, 1, 1},
+  .gyro_bias_dps = {0, 0, 0},
+  .gyro_scale = {1, 1, 1},
+  .temperature_offset_c = 0,
+};
 
 /* USER CODE END 0 */
 
@@ -148,9 +157,13 @@ int main(void)
   MX_GPIO_Init();
   MX_I2C2_Init();
   MX_USART2_UART_Init();
+  MX_TIM1_Init();
+  MX_TIM3_Init();
+  MX_TIM4_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   if (!TelemetryApp_Init(&huart2)) Error_Handler();
-  SensorApp_Init(&hi2c2);
+  SensorApp_Init(&hi2c2, &calibration); // 初始化传感器应用，传入 I2C 总线和校准参数
   DisplayApp_Init(&hi2c2);
   MotorApp_Init(MotorBoard_Init(), HAL_GetTick());
   Scheduler_Init(tasks, TASK_COUNT, HAL_GetTick());
