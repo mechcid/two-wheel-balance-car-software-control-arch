@@ -117,9 +117,9 @@ static SchedulerTask tasks[] = {
 
 //定义MPU的零点偏移和缩放倍数
 static SensorCalibration calibration = {
-  .accel_bias_g = {0, 0, 0},
-  .accel_scale = {1, 1, 1},
-  .gyro_bias_dps = {0, 0, 0},
+  .accel_bias_g = {0.01, 0, 0.2},
+  .accel_scale = {-1, -1, 1},//反转一下x和y方向上的正负
+  .gyro_bias_dps = {-1.6, +1.5, -0.6},
   .gyro_scale = {1, 1, 1},
   .temperature_offset_c = 0,
 };

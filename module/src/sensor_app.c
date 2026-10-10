@@ -20,8 +20,8 @@ bool SensorApp_SetCalibration(const SensorCalibration *value){
     for (unsigned i = 0; i < 3; ++i) {
         if (!isfinite(value->accel_bias_g[i]) || fabsf(value->accel_bias_g[i]) > 16 ||
             !isfinite(value->gyro_bias_dps[i]) || fabsf(value->gyro_bias_dps[i]) > 2000 ||
-            !isfinite(value->accel_scale[i]) || value->accel_scale[i] <= 0 || value->accel_scale[i] > 10 ||
-            !isfinite(value->gyro_scale[i]) || value->gyro_scale[i] <= 0 || value->gyro_scale[i] > 10)
+            !isfinite(value->accel_scale[i]) || value->accel_scale[i] > 10 ||
+            !isfinite(value->gyro_scale[i]) || value->gyro_scale[i] > 10)
             return false;
     }
     if (!isfinite(value->temperature_offset_c) || fabsf(value->temperature_offset_c) > 200)
@@ -56,6 +56,7 @@ HAL_StatusTypeDef SensorApp_Init(I2C_HandleTypeDef *bus, const SensorCalibration
 /* 换算系数对应底层驱动配置的 ±2 g、±250 度/秒量程。
  * 物理量校准统一在此完成，显示和遥测模块只使用修正结果。 */
 static SensorSample correct(const MPU6050_Sample *raw, uint32_t now_ms){
+    //默认的储存单位为g，degree/s，温度为摄氏度
     const int16_t accel[] = {raw->ax, raw->ay, raw->az};
     const int16_t gyro[] = {raw->gx, raw->gy, raw->gz};
     float a[3], g[3];
@@ -63,7 +64,8 @@ static SensorSample correct(const MPU6050_Sample *raw, uint32_t now_ms){
         a[i] = ((float)accel[i] / 16384.0f - calibration.accel_bias_g[i]) * calibration.accel_scale[i];
         g[i] = ((float)gyro[i] / 131.0f - calibration.gyro_bias_dps[i]) * calibration.gyro_scale[i];
     }
-    return (SensorSample){.ax_g=a[0], .ay_g=a[1], .az_g=a[2],
+    return (SensorSample){
+        .ax_g=a[0], .ay_g=a[1], .az_g=a[2],
         .gx_dps=g[0], .gy_dps=g[1], .gz_dps=g[2],
         .temperature_c=(float)raw->temperature / 340.0f + 36.53f + calibration.temperature_offset_c,
         .timestamp_ms=now_ms, .valid=true};
@@ -86,5 +88,7 @@ HAL_StatusTypeDef SensorApp_Update(uint32_t now_ms)
     capture_status(HAL_OK);
     return HAL_OK;
 }
+
+//定义两个返回只读指针的函数，用于获取状态信息
 const SensorSample *SensorApp_GetSample(void) { return &corrected_sample; }
 const SensorStatus *SensorApp_GetStatus(void) { return &status; }
