@@ -17,7 +17,7 @@
 
 **本工程的 Ctrl+Shift+B 会写入板卡 Flash**，不仅是编译。没有连接 CMSIS-DAP 时请选“只编译”任务。
 
-开始调试后点击代码行号左边设置断点。例如在 `module/src/sensor_app.c` 的 `status.reads++` 处停住，展开变量查看 `corrected_sample.ax_g/ay_g/az_g`。先按 F5 走过 `main` 的启动断点，OLED 才会初始化；CPU 停住时屏幕数字停止更新是正常的。
+开始调试后点击代码行号左边设置断点。例如在 `module/overlay_app/src/sensor_app.c` 的 `status.reads++` 处停住，展开变量查看 `corrected_sample.ax_g/ay_g/az_g`。先按 F5 走过 `main` 的启动断点，OLED 才会初始化；CPU 停住时屏幕数字停止更新是正常的。
 
 编译错误会出现在“问题”面板与任务终端；遇到失败请修复后重试，不要选择用旧固件继续调试。结束一个调试会话后再烧录，避免两个程序同时占用 CMSIS-DAP。
 
@@ -56,19 +56,19 @@ GDB 用 ELF 中的调试符号把机器地址对应到源码行和变量，OpenO
 | `.vscode/launch.json` | Cortex-Debug + OpenOCD + CMSIS-DAP；指定 ELF、GDB、芯片、SWD 和停在 main；preLaunchTask 先编译 |
 | `.vscode/settings.json` | 把旧 UART 索引路径迁移到 module，继续使用真实 ARM 编译数据库；保持内存限制与关闭自动配置 |
 | `.vscode/extensions.json` | 推荐 C/C++、CMake Tools、Cortex-Debug 三个扩展 |
-| `CMakeLists.txt` | 登记 module/src 的模块实现文件，添加 module/inc，保持 ELF 转 BIN |
+| `CMakeLists.txt` | 登记两层 src 的模块实现文件，添加两层 inc，保持 ELF 转 BIN |
 | `CMakePresets.json` | 沿用现有 Debug/Release 预设，任务直接调用它们 |
 | `cmake/gcc-arm-none-eabi.cmake` | 沿用现有 ARM 工具链、链接脚本与编译选项 |
 
 编译任务使用 `--parallel 2`，限制同时编译数量；这是编译阶段的限制，与 IntelliSense 后台索引的内存控制是两回事。没有修改本机全局快捷键、安装扩展、修改系统服务或 sudo 配置。
 
-新建 `.h` 放入 `module/inc` 后通常不必改 CMake；新建 `.c` 放入 `module/src` 后需加入顶层 `target_sources`。采用明确文件列表，避免临时文件被自动编译。
+新建 `.h` 按职责放入 `module/base/inc` 或 `module/overlay_app/inc` 后通常不必改 CMake；新建 `.c` 放入对应层的 `src` 后需加入顶层 `target_sources`。采用明确文件列表，避免临时文件被自动编译。
 
 ### 3.1 settings.json：让编辑器正确理解工程
 
 **与你观察到的“头文件能解析、能跳转”最直接相关的是 `.vscode/settings.json`，以及它指向的 `build/Debug/compile_commands.json`。** 根据当前配置，这两处让 C/C++ 扩展获得了 ARM 编译器、头文件目录和条件编译宏。此前没有逐项开关做对照实验，所以不能把恢复归因于某一个开关。
 
-编译器知道如何编译，不代表编辑器自动知道如何解析。比如 `sensor_app.c` 中写了 `#include "mpu6050.h"`，编辑器需要知道应到 `module/inc` 查找；处理 STM32 头文件时，还需要知道启用了 `STM32F103xB` 和 `USE_HAL_DRIVER`。这些条件不正确时，可能出现找不到头文件、类型未定义、条件编译分支变灰或无法准确跳转。
+编译器知道如何编译，不代表编辑器自动知道如何解析。比如 `sensor_app.c` 中写了 `#include "mpu6050.h"`，编辑器需要知道应到 `module/base/inc` 查找；处理 STM32 头文件时，还需要知道启用了 `STM32F103xB` 和 `USE_HAL_DRIVER`。这些条件不正确时，可能出现找不到头文件、类型未定义、条件编译分支变灰或无法准确跳转。
 
 本项目关键配置如下（表中前缀 `C_Cpp.default.` 已省略）：
 
@@ -77,7 +77,7 @@ GDB 用 ELF 中的调试符号把机器地址对应到源码行和变量，OpenO
 | `compilerPath` | `/usr/bin/arm-none-eabi-g++`；为未加入构建的新 C++ 文件查询 ARM C++ 标准库路径和预定义宏 |
 | `intelliSenseMode` | `linux-gcc-arm`；指定目标架构对应的解析模式，不能把 STM32 当电脑的 x86 程序理解 |
 | `compileCommands` | 指向 `build/Debug/compile_commands.json`；按每个源文件的真实编译命令配置解析 |
-| `includePath` | 列出 `Core/Inc`、`module/inc`、HAL、CMSIS；作为基础配置中的头文件搜索目录 |
+| `includePath` | 列出 `Core/Inc`、`module/base/inc`、`module/overlay_app/inc`、HAL、CMSIS；作为基础配置中的头文件搜索目录 |
 | `defines` | `USE_HAL_DRIVER`、`STM32F103xB`；基础配置中的条件编译宏 |
 | `cStandard` | `c11`；基础配置采用的 C 语言标准 |
 | `browse.path` | 限定符号浏览的范围为 Core、module、Drivers；与精确语义解析使用的编译参数作用不同 |

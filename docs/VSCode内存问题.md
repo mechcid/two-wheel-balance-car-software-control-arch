@@ -52,7 +52,7 @@ Windows 上没有做同版本、同扩展、同目录、同内存的对照，因
 
 最后一次打开 C 文件的操作被用户中断。**尚未完成修复后持续内存监测和代码跳转实测，不能宣称已彻底解决。**
 
-建议在 VSCode 中使用“文件 → 打开文件夹”，选择 `/home/mechcid/work/balance_car`，确认标题为 balance_car，而不是“无标题（工作区）”。重新加载窗口后打开 module/src/mpu6050.c，再观察任务管理器中的 cpptools 进程和内存，并测试 HAL_I2C_Mem_Read 的定义跳转。
+建议在 VSCode 中使用“文件 → 打开文件夹”，选择 `/home/mechcid/work/balance_car`，确认标题为 balance_car，而不是“无标题（工作区）”。重新加载窗口后打开 module/base/src/mpu6050.c，再观察任务管理器中的 cpptools 进程和内存，并测试 HAL_I2C_Mem_Read 的定义跳转。
 
 当前配置未恢复 epass 文件夹中原来关闭的 IntelliSense；Linux 内核的精确跳转需要为该内核单独选择索引范围/编译数据库，不能把整个 Buildroot 根目录不加区分地交给扩展扫描。
 

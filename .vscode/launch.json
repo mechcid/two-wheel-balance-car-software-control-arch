@@ -17,7 +17,11 @@
             "serverpath": "/usr/bin/openocd",
             "armToolchainPath": "/usr/bin",
             "runToEntryPoint": "main",
-            "preLaunchTask": "STM32: 编译 Debug"
+            "preLaunchTask": "STM32: 编译 Debug",
+            "liveWatch": {
+                "enabled": true,
+                "samplesPerSecond": 4
+            }
         }
     ]
 }

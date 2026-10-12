@@ -21,15 +21,17 @@ STM32F103C8T6 + MPU6050 + SSD1306 OLED，使用硬件 I2C2，并通过 USART2/HC
 ```text
 Core/                  板级初始化、IRQ、main 入口（CubeMX）
 Drivers/               STM32 HAL 与 CMSIS
-module/inc/            全部模块头文件和 OLED 字模
-module/src/            驱动、应用、算法及调度器实现
+module/base/inc/       底层驱动与基础工具接口、OLED 字模
+module/base/src/       硬件驱动、计时与通用调度实现
+module/overlay_app/inc/ 上层算法与应用接口
+module/overlay_app/src/ 姿态解算、传感器/电机/显示/遥测应用
 cmake/                 交叉编译工具链及 CubeMX 构建配置
 .vscode/               图形化编译、烧录、调试和代码索引配置
 docs/                  使用说明、必要硬件资料
 build/Debug、Release/  自动生成的编译产物，可删除后重新构建
 ```
 
-添加模块 `.c` 后，在顶层 `CMakeLists.txt` 的 `target_sources` 中登记；`module/inc` 已加入头文件搜索路径，VSCode 的备用头文件路径也已同步。目录暂时保持平铺，方便先审阅功能修改。
+添加模块 `.c` 后，在顶层 `CMakeLists.txt` 的 `target_sources` 中登记；`module/base/inc` 和 `module/overlay_app/inc` 均已加入头文件搜索路径，VSCode 的备用头文件路径也已同步。底层驱动及基础工具放在 `base`，PID、速度控制器、姿态算法和应用组合放在 `overlay_app`；两层内部各自区分 `inc` 与 `src`。
 
 ## 当前接口
 

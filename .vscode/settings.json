@@ -7,7 +7,8 @@
     ],
     "C_Cpp.default.includePath": [
         "${workspaceFolder}/Core/Inc",
-        "${workspaceFolder}/module/inc",
+        "${workspaceFolder}/module/base/inc",
+        "${workspaceFolder}/module/overlay_app/inc",
         "${workspaceFolder}/Drivers/STM32F1xx_HAL_Driver/Inc",
         "${workspaceFolder}/Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
         "${workspaceFolder}/Drivers/CMSIS/Device/ST/STM32F1xx/Include",

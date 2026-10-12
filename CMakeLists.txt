@@ -51,28 +51,29 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    module/src/timebase.c
-    module/src/TIM_IT.c
-    module/src/motion_estimator.c
-    module/src/motion_app.c
-    module/src/mpu6050.c
+    module/base/src/timebase.c
+    module/base/src/TIM_IT.c
+    module/overlay_app/src/motion_estimator.c
+    module/overlay_app/src/motion_app.c
+    module/base/src/mpu6050.c
     Core/Src/motor_board.c
-    module/src/encoders.c
-    module/src/motor_app.cpp
-    module/src/scheduler.c
-    module/src/display_app.c
-    module/src/telemetry_app.c
-    module/src/sensor_app.c
-    module/src/uart_debug.c
-    module/src/oled.c
+    module/base/src/encoders.c
+    module/overlay_app/src/motor_app.cpp
+    module/base/src/scheduler.c
+    module/overlay_app/src/display_app.c
+    module/overlay_app/src/telemetry_app.c
+    module/overlay_app/src/sensor_app.c
+    module/base/src/uart_debug.c
+    module/base/src/oled.c
 )
 
 # Cortex-M3 没有 FPU，解算热路径在 Debug 下也启用优化，保留调试符号。
-set_source_files_properties(module/src/motion_estimator.c PROPERTIES COMPILE_OPTIONS "-O2")
+set_source_files_properties(module/overlay_app/src/motion_estimator.c PROPERTIES COMPILE_OPTIONS "-O2")
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    module/inc
+    module/base/inc
+    module/overlay_app/inc
 )
 
 # Add project symbols (macros)

@@ -2,7 +2,7 @@
 
 日期：2026-10-12。
 
-串口命令的数值转换已改为轻量十进制解析。修改位于 `module/src/uart_debug.c`，公开接口说明位于 `module/inc/uart_debug.h`。
+串口命令的数值转换已改为轻量十进制解析。修改位于 `module/base/src/uart_debug.c`，公开接口说明位于 `module/base/inc/uart_debug.h`。
 
 ## 为什么修改
 
