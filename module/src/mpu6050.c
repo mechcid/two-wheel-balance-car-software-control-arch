@@ -1,4 +1,5 @@
 #include "mpu6050.h"
+#include <math.h>
 
 /* HAL 接口要求将 7 位设备地址左移一位；所有传输均设置超时。 */
 static HAL_StatusTypeDef read_reg(MPU6050 *d, uint8_t reg, uint8_t *data, uint16_t n)
@@ -27,8 +28,8 @@ HAL_StatusTypeDef MPU6050_Init(MPU6050 *d, I2C_HandleTypeDef *bus)
     if (write_reg(d, 0x6b, 0x80) != HAL_OK) return d->status;
     HAL_Delay(100);
     /* 以 X 轴陀螺仪作为 PLL 时钟参考，启用全部轴，数字低通滤波配置为 3，
-     * 输出速率为 100 Hz，角速度量程为 ±250 度/秒，加速度量程为 ±2 g。 */
-    const uint8_t config[][2] = {{0x6b,1},{0x6c,0},{0x1a,3},{0x19,9},{0x1b,0},{0x1c,0}};
+     * 输出速率为 200 Hz，角速度量程为 ±250 度/秒，加速度量程为 ±2 g。 */
+    const uint8_t config[][2] = {{0x6b,1},{0x6c,0},{0x1a,3},{0x19,4},{0x1b,0},{0x1c,0},{0x37,0},{0x38,1}};
     for (unsigned i = 0; i < sizeof(config)/sizeof(config[0]); ++i) {
         uint8_t actual = 0;
         if (write_reg(d, config[i][0], config[i][1]) != HAL_OK) return d->status;
@@ -57,7 +58,7 @@ HAL_StatusTypeDef MPU6050_Read(MPU6050 *d, MPU6050_Sample *out)
     if (read_reg(d, 0x3b, raw, sizeof(raw)) != HAL_OK) return d->status;
     /* 仅在完整读取成功后更新输出样本，避免将旧数据标记为新数据。 */
     *out = (MPU6050_Sample){signed_be(raw), signed_be(raw+2), signed_be(raw+4),
-        signed_be(raw+6), signed_be(raw+8), signed_be(raw+10), signed_be(raw+12)};
+        signed_be(raw+8), signed_be(raw+10), signed_be(raw+12)};
     return HAL_OK;
 }
 
@@ -71,4 +72,26 @@ HAL_StatusTypeDef MPU6050_Diagnose(MPU6050 *d, MPU6050_Diagnostic *r)
         read_reg(d, 0x48, &r->separate[1], 1) != HAL_OK) return d->status;
     r->ok = 1;
     return HAL_OK;
+}
+
+HAL_StatusTypeDef MPU6050_SetOutputRate(MPU6050 *d, float hz, float *actual)
+{
+    if (!d || !d->ready || !actual || !isfinite(hz) || hz<=0) return HAL_ERROR;
+    float divider=1000.0f/hz;
+    if (divider>256) divider=256;
+    if (divider<1) divider=1;
+    uint16_t n=(uint16_t)(divider+0.5f);
+    uint8_t value=(uint8_t)(n-1), readback;
+    if (write_reg(d,0x19,value)!=HAL_OK || read_reg(d,0x19,&readback,1)!=HAL_OK)
+        return d->status;
+    if (readback!=value) return d->status=HAL_ERROR;
+    *actual=1000.0f/n;
+    return HAL_OK;
+}
+HAL_StatusTypeDef MPU6050_DataReady(MPU6050 *d)
+{
+    if (!d || !d->ready) return HAL_ERROR;
+    uint8_t value;
+    if (read_reg(d,0x3a,&value,1)!=HAL_OK) return d->status;
+    return (value & 1) ? HAL_OK : HAL_BUSY;
 }

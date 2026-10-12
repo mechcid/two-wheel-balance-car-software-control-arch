@@ -66,6 +66,8 @@ int8_t UART_Debug_Register(UART_CmdEntry_t *cmd_entry);
 
 // 处理指定实例收到的完整命令：解析并执行，回执打到该实例对应的串口
 // 注意：调用后实例内部标志位会自动清空，无需外部手动清除
+// 数值支持可选 +/- 和十进制数字；TYPE_FLOAT 还允许一个小数点（如 -.5、5.）。
+// 不接受空白、指数、十六进制、NaN/Inf；非法输入不赋值、不触发回调或标志。
 int8_t UART_Debug_Process(UART_Debug_t *inst);
 
 // 从环形缓冲里按 @...\r\n 规则拼装命令，返回第一个拼好完整命令的实例（初始化顺序即优先级），没有则返回 NULL

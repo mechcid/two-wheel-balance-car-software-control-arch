@@ -40,6 +40,10 @@ add_executable(${CMAKE_PROJECT_NAME})
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
 
+# Debug 保留 -g3，项目及 HAL 使用 -Og，给解算和数学库留出 64 KiB Flash 空间。
+target_compile_options(STM32_Drivers PRIVATE "$<$<CONFIG:Debug>:-Og>")
+target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<CONFIG:Debug>:-Og>")
+
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
@@ -47,6 +51,10 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+    module/src/timebase.c
+    module/src/TIM_IT.c
+    module/src/motion_estimator.c
+    module/src/motion_app.c
     module/src/mpu6050.c
     Core/Src/motor_board.c
     module/src/encoders.c
@@ -58,6 +66,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     module/src/uart_debug.c
     module/src/oled.c
 )
+
+# Cortex-M3 没有 FPU，解算热路径在 Debug 下也启用优化，保留调试符号。
+set_source_files_properties(module/src/motion_estimator.c PROPERTIES COMPILE_OPTIONS "-O2")
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE

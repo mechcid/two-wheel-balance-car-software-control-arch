@@ -12,20 +12,24 @@ STM32F103C8T6 + MPU6050 + SSD1306 OLED，使用硬件 I2C2，并通过 USART2/HC
 
 [VSCode 编译、烧录与调试说明](docs/VSCode编译烧录调试.md) · [前次整理与实测总结](docs/任务总结.md) · [当前调度器与采集架构](docs/调度器与采集架构.md)
 
+[MPU6050 仅姿态估计调整说明](docs/MPU6050仅姿态估计调整说明.md)：当前算法、接口、OLED 和串口协议，以及取消 IMU 位移积分的具体改动。
+
+[本轮修改详解与代码阅读指南](docs/本轮修改详解与代码阅读指南.md) 保留前次实现的历史记录。当前 I2C2 保留 100 kHz；MPU 固定输出 200 Hz，DWT 提供统一微秒时间基准，TIM2 不再启动采集中断。详见 [200Hz IMU 与统一时间基准](docs/IMU_200Hz与统一时间基准.md)。实际板上采集吞吐尚未验证。
+
 ## 目录
 
 ```text
 Core/                  板级初始化、IRQ、main 入口（CubeMX）
 Drivers/               STM32 HAL 与 CMSIS
-module/inc/            UART、MPU6050、OLED、应用层头文件和字模
-module/src/            对应实现；后续板级以上代码放这里
+module/inc/            全部模块头文件和 OLED 字模
+module/src/            驱动、应用、算法及调度器实现
 cmake/                 交叉编译工具链及 CubeMX 构建配置
 .vscode/               图形化编译、烧录、调试和代码索引配置
 docs/                  使用说明、必要硬件资料
 build/Debug、Release/  自动生成的编译产物，可删除后重新构建
 ```
 
-添加模块 `.c` 后，在顶层 `CMakeLists.txt` 的 `target_sources` 中登记；`module/inc` 已加入头文件搜索路径。
+添加模块 `.c` 后，在顶层 `CMakeLists.txt` 的 `target_sources` 中登记；`module/inc` 已加入头文件搜索路径，VSCode 的备用头文件路径也已同步。目录暂时保持平铺，方便先审阅功能修改。
 
 ## 当前接口
 
@@ -36,13 +40,20 @@ build/Debug、Release/  自动生成的编译产物，可删除后重新构建
 | HC-05 | USART2 PA2=TX、PA3=RX，9600 / 8N1，共地 |
 | CMSIS-DAP | SWDIO、SWCLK、GND 与板卡相连，板卡正常供电 |
 
-OLED 显示三轴加速度，`1000 mg = 1 g`；使用 ±2g 档，换算为 `raw × 1000 / 16384`，未添加零偏校准。
+OLED 显示 Roll、Pitch、Yaw 三组姿态角（度，保留一位小数），发生采样中断时保留 GAP 提示；未取得有效、新鲜的解算数据时显示等待状态。传感器仍使用 ±2g 档，并使用 main 中配置的零偏及比例校准，三轴加速度输出取反。
 
-主循环通过独立 `scheduler` 调度模块运行各任务；采样周期、显示周期、上报周期均在 `Core/Src/main.c` 的任务表设置。`sensor_app` 私有保存原始数据，对外只提供修正后的 g、°/s、℃及时间戳。默认校准为零偏 0、比例 1。
+主循环按 5 ms 固定截止时间优先采集并解算姿态；DWT 时间模块处理周期计数回绕，姿态 dt 来自相邻成功样本的微秒时间戳。其他任务仍由 `scheduler` 调度。OLED 每次发送前要求至少 2.5 ms 采集余量。`sensor_app` 发布 `ImuSample`：校准后的 g、°/s、微秒时间戳、软件发布序号和有效标志，20 ms 未更新视为过期。main 传入当前校准配置；传 NULL 才采用零偏 0、比例 1。
 
-串口每约 200 ms 输出 `MPU_C,毫秒,AX_mg,AY_mg,AZ_mg,TEMP_mC,GX_mdps,GY_mdps,GZ_mdps`，各物理量乘 1000 后以整数传输。此协议替代旧的原始 `MPU` 帧，旧解析程序需要更新。
+串口每约 200 ms 输出 `IMU,微秒,sequence,AX_mg,AY_mg,AZ_mg,GX_mdps,GY_mdps,GZ_mdps`，各物理量乘 1000 后以整数传输。温度列已删除，旧 `MPU_C` 解析程序需要更新。
 命令须以 CRLF 结尾：`@ping`、`@status`、`@stream:0` / `@stream:1`。
+命令数值使用轻量十进制解析，支持正负整数和普通小数，不支持科学计数法、空白或特殊浮点值；格式、精度和体积变化见 [UART 数值解析优化说明](docs/UART数值解析优化说明.md)。
 `@status` 包含修正样本有效性、OLED、MPU 和 UART 状态。原始数据诊断不再作为普通交互命令；底层尾字节保护仍保留，原因见 [I²C 尾字节诊断](docs/i2c_tail_diagnostic.md)。
+
+## 姿态估计
+
+`motion_estimator` 仅融合加速度计和陀螺仪估计姿态，`motion_app` 负责采集与实际 dt，`timebase` 提供统一微秒时间，`TIM_IT` 保留为未启动的 TIM2 节拍工具。`@pose` 查看状态，`@stream:2` 输出 `POSE_US,时间_us,valid,roll_mdeg,pitch_mdeg,yaw_mdeg`。旧帧末尾的 X/Y/Z 位移字段和 `@pzero`、`@still` 命令已删除。
+
+已取消 IMU 速度、位移积分。后续将用编码器实现小车位移估计，目前尚未加入编码器里程计算。详见 [当前实现说明](docs/MPU6050仅姿态估计调整说明.md)。
 
 ## 电机控制接入
 

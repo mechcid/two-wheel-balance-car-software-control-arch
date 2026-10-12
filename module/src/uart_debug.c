@@ -5,8 +5,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
-#include <stdlib.h>
-#include <errno.h>
+#include <stdbool.h>
 #include <limits.h>
 #include <math.h>
 
@@ -192,10 +191,65 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
 static UART_CmdEntry_t cmd_table[MAX_DEBUG_CMDS];
 static int cmd_count = 0;
 
+/* 只接受完整的十进制整数；累加前检查范围，避免有符号溢出。
+ * 使用无符号数保存绝对值，使 INT_MIN 也能正常解析。 */
+static bool parse_integer(const char *text, int *output) {
+    bool negative = *text == '-';
+    if (*text == '+' || *text == '-') ++text;
+    if (*text < '0' || *text > '9') return false;
+
+    unsigned limit = negative ? (unsigned)INT_MAX + 1u : (unsigned)INT_MAX;
+    unsigned value = 0;
+    for (; *text; ++text) {
+        if (*text < '0' || *text > '9') return false;
+        unsigned digit = (unsigned)(*text - '0');
+        if (value > (limit - digit) / 10u) return false;
+        value = value * 10u + digit;
+    }
+    *output = negative ? (value == (unsigned)INT_MAX + 1u ? INT_MIN : -(int)value)
+                       : (int)value;
+    return true;
+}
+
+/* 只接受可选正负号、数字和一个小数点，不支持空白、指数或特殊数值。
+ * 整数和小数分开累加，避免长小数在缩放之前造成中间结果溢出。
+ * 采用单精度近似转换，面向串口调参，不保证标准库级别的最后一位舍入。 */
+static bool parse_decimal(const char *text, float *output) {
+    bool negative = *text == '-';
+    if (*text == '+' || *text == '-') ++text;
+    bool point = false, have_digit = false, nonzero = false;
+    float value = 0.0f, place = 0.1f;
+
+    for (; *text; ++text) {
+        if (*text == '.' && !point) {
+            point = true;
+            continue;
+        }
+        if (*text < '0' || *text > '9') return false;
+        unsigned digit = (unsigned)(*text - '0');
+        have_digit = true;
+        nonzero = nonzero || digit != 0;
+        if (point) {
+            value += (float)digit * place;
+            place *= 0.1f;
+        } else {
+            value = value * 10.0f + (float)digit;
+        }
+        if (!isfinite(value)) return false;
+    }
+    /* 非零输入太小而完全变成零时拒绝，避免意外把控制参数清零。 */
+    if (!have_digit || (nonzero && value == 0.0f)) return false;
+    *output = negative ? -value : value;
+    return true;
+}
+
 // 注册函数：外部模块在初始化时调用（命令表全局共享，所有实例通用）
 int8_t UART_Debug_Register(UART_CmdEntry_t *cmd_entry) {
-    if (!cmd_entry || !cmd_entry->cmd || !cmd_entry->cmd[0] ||
-        cmd_entry->type < TYPE_NONE || cmd_entry->type > TYPE_FLOAT ||
+    if (!cmd_entry || 
+        !cmd_entry->cmd || 
+        !cmd_entry->cmd[0] ||
+        cmd_entry->type < TYPE_NONE ||
+        cmd_entry->type > TYPE_FLOAT ||
         (cmd_entry->type != TYPE_NONE && !cmd_entry->var_ptr)) return -1;
     for (int i = 0; i < cmd_count; ++i)
         if (!strcmp(cmd_table[i].cmd, cmd_entry->cmd)) return -1;
@@ -246,14 +300,12 @@ int8_t UART_Debug_Process(UART_Debug_t *inst) {
 
                 case TYPE_INT:
                     if (numStr != NULL) {
-                        char *end;
-                        errno = 0;
-                        long value = strtol(numStr, &end, 10);
-                        if (errno || end == numStr || *end || value < INT_MIN || value > INT_MAX) {
+                        int value;
+                        if (!parse_integer(numStr, &value)) {
                             print_to_inst(inst, "Error: Invalid integer\r\n");
                             return -1;
                         }
-                        *(int*)cmd_table[i].var_ptr = (int)value;
+                        *(int*)cmd_table[i].var_ptr = value;
                     }
                     else {
                         print_to_inst(inst, "Error: Value required for command %s\r\n", cmd_table[i].cmd);
@@ -262,10 +314,8 @@ int8_t UART_Debug_Process(UART_Debug_t *inst) {
                     break;
                 case TYPE_FLOAT:
                     if (numStr != NULL) {
-                        char *end;
-                        errno = 0;
-                        float value = strtof(numStr, &end);
-                        if (errno || end == numStr || *end || !isfinite(value)) {
+                        float value;
+                        if (!parse_decimal(numStr, &value)) {
                             print_to_inst(inst, "Error: Invalid float\r\n");
                             return -1;
                         }

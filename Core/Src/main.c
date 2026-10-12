@@ -32,6 +32,8 @@
 #include "oled.h"
 #include "motor_app.h"
 #include "motor_board.h"
+#include "motion_app.h"
+#include "timebase.h"
 
 /* USER CODE END Includes */
 
@@ -69,21 +71,20 @@ static void motor_task(void *context)
   (void)context;
   MotorApp_Update(HAL_GetTick());
 }
-static void sample_task(void *context)
-{
-  (void)context;
-  SensorApp_Update(HAL_GetTick());
-}
 static bool sample_available(void)
 {
-  const SensorSample *sample = SensorApp_GetSample();
+  const ImuSample *sample = SensorApp_GetSample();
   return SensorApp_GetStatus()->ready && sample->valid &&
-         (uint32_t)(HAL_GetTick() - sample->timestamp_ms) < 500;
+         (uint32_t)(Timebase_NowUs() - sample->timestamp_us) < IMU_TIMEOUT_US;
 }
 static void display_task(void *context)
 {
   (void)context;
-  DisplayApp_Render(SensorApp_GetSample(), sample_available());
+  float angles[3];
+  MotionApp_GetEuler(angles);
+  bool available=sample_available() &&
+      (uint32_t)(Timebase_NowUs()-MotionApp_GetStatus()->timestamp_us)<IMU_TIMEOUT_US;
+  DisplayApp_Render(MotionApp_GetState(), angles, available);
 }
 static void report_task(void *context)
 {
@@ -91,7 +92,12 @@ static void report_task(void *context)
   TelemetryApp_Report(SensorApp_GetSample(), sample_available());
 }
 static void uart_task(void *context) { (void)context; TelemetryApp_Poll(); }
-static void oled_task(void *context) { (void)context; DisplayApp_Poll(); }
+static void oled_task(void *context)
+{
+  (void)context;
+  /* 100 kHz 下单块约 2.07 ms，额外留出软件开销余量。 */
+  if (MotionApp_TimeUntilSampleUs() >= 2500U) DisplayApp_Poll();
+}
 static void sensor_retry_task(void *context)
 {
   (void)context;
@@ -105,7 +111,6 @@ static void oled_retry_task(void *context)
  * 故障恢复目前会阻塞等待 MPU 复位和稳定，因此不保证硬实时性。 */
 static SchedulerTask tasks[] = {
   {.function=motor_task,        .period_ms=10,   .enabled=true},
-  {.function=sample_task,       .period_ms=10,   .enabled=true},
   {.function=uart_task,         .period_ms=0,    .enabled=true},
   {.function=display_task,      .period_ms=200,  .enabled=true},
   {.function=report_task,       .period_ms=200,  .enabled=true},
@@ -118,10 +123,9 @@ static SchedulerTask tasks[] = {
 //定义MPU的零点偏移和缩放倍数
 static SensorCalibration calibration = {
   .accel_bias_g = {0.01, 0, 0.2},
-  .accel_scale = {-1, -1, 1},//反转一下x和y方向上的正负
+  .accel_scale = {-1, -1, -1},//反转一下x，y，z方向上的正负
   .gyro_bias_dps = {-1.6, +1.5, -0.6},
   .gyro_scale = {1, 1, 1},
-  .temperature_offset_c = 0,
 };
 
 /* USER CODE END 0 */
@@ -150,6 +154,7 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
+  if (!Timebase_Init()) Error_Handler();
 
   /* USER CODE END SysInit */
 
@@ -166,6 +171,9 @@ int main(void)
   SensorApp_Init(&hi2c2, &calibration); // 初始化传感器应用，传入 I2C 总线和校准参数
   DisplayApp_Init(&hi2c2);
   MotorApp_Init(MotorBoard_Init(), HAL_GetTick());
+  /* 加速度输出保留三轴反号；解算内部恢复为右手坐标系中的比力。 */
+  MotionConfig motion_config=MotionEstimator_DefaultConfig();
+  if (!MotionApp_Init(&motion_config)) Error_Handler();
   Scheduler_Init(tasks, TASK_COUNT, HAL_GetTick());
 
   /* USER CODE END 2 */
@@ -177,6 +185,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    MotionApp_Poll(); /* 优先处理 200 Hz 采集截止时间；阻塞式 I2C 不在中断内执行。 */
     Scheduler_Run(tasks, TASK_COUNT, HAL_GetTick());
   }
   /* USER CODE END 3 */
