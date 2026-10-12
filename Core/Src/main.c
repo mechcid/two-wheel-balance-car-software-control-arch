@@ -69,7 +69,7 @@ void SystemClock_Config(void);
 static void motor_task(void *context)
 {
   (void)context;
-  MotorApp_Update(HAL_GetTick());
+  MotorApp_Update(Timebase_NowUs());
 }
 static bool sample_available(void)
 {
@@ -86,12 +86,14 @@ static void display_task(void *context)
       (uint32_t)(Timebase_NowUs()-MotionApp_GetStatus()->timestamp_us)<IMU_TIMEOUT_US;
   DisplayApp_Render(MotionApp_GetState(), angles, available);
 }
-static void report_task(void *context)
-{
+
+//区分了两个串口任务，分别是串口打印任务和解析字符串命令任务
+static void report_task(void *context){
   (void)context;
   TelemetryApp_Report(SensorApp_GetSample(), sample_available());
 }
 static void uart_task(void *context) { (void)context; TelemetryApp_Poll(); }
+
 static void oled_task(void *context)
 {
   (void)context;
@@ -170,7 +172,7 @@ int main(void)
   if (!TelemetryApp_Init(&huart2)) Error_Handler();
   SensorApp_Init(&hi2c2, &calibration); // 初始化传感器应用，传入 I2C 总线和校准参数
   DisplayApp_Init(&hi2c2);
-  MotorApp_Init(MotorBoard_Init(), HAL_GetTick());
+  MotorApp_Init(MotorBoard_Init(), Timebase_NowUs());
   /* 加速度输出保留三轴反号；解算内部恢复为右手坐标系中的比力。 */
   MotionConfig motion_config=MotionEstimator_DefaultConfig();
   if (!MotionApp_Init(&motion_config)) Error_Handler();

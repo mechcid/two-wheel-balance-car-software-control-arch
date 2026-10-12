@@ -3,12 +3,14 @@
 #include "timebase.h"
 #include <math.h>
 
+//这个模块用于储存MPU6050的原始数据和矫正后的数据，并通过函数暴露给外界使用
+
 static MPU6050 device;
 static I2C_HandleTypeDef *sensor_bus;
-static MPU6050_Sample raw_sample; /* 私有原始样本，不向外部使用者暴露。 */
-static ImuSample corrected_sample;
+static MPU6050_Sample raw_sample;   //私有原始样本，不向外部使用者暴露
+static ImuSample corrected_sample;  //矫正后的样本，向外部使用者暴露
 static SensorStatus status;
-static SensorCalibration calibration;
+static SensorCalibration calibration;   //矫正基准
 static float actual_rate_hz;
 
 //定义放缩倍数和零点偏移，主要在检查输入的值是否合法，合法了才会更新校准参数。起校准作用

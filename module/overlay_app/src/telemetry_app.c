@@ -2,6 +2,7 @@
 #include "uart_debug.h"
 #include "oled.h"
 #include "motor_app.h"
+#include "timebase.h"
 #include "motion_app.h"
 #include <math.h>
 #include <limits.h>
@@ -24,29 +25,22 @@ static float motor_left, motor_right;
 static void motor_status(void)
 {
     const MotorAppStatus *m=MotorApp_GetStatus();
-    static const char *names[]={"STOPPED","DUTY","SPEED","FAULT","UNCONFIGURED"};
-    const char *name=(unsigned)m->mode<5 ? names[m->mode] : "INVALID";
-    UART_Printf("MOTOR mode=%s tick=%lu faults=%lu\r\n", name,
-        (unsigned long)m->timestamp_ms,(unsigned long)m->faults);
+    static const char *names[]={"STOPPED","DUTY","FAULT","UNCONFIGURED"};
+    const char *name=(unsigned)m->mode<4 ? names[m->mode] : "INVALID";
+    UART_Printf("MOTOR mode=%s us=%lu faults=%lu\r\n", name,
+        (unsigned long)m->timestamp_us,(unsigned long)m->faults);
     UART_Printf("WHEEL L=%ld R=%ld mrpm dutyL=%ld dutyR=%ld permille valid=%u,%u\r\n",
-        (long)(m->rpm[0]*1000),(long)(m->rpm[1]*1000),
-        (long)(m->duty[0]*1000),(long)(m->duty[1]*1000),m->feedback_valid[0],m->feedback_valid[1]);
+        (long)(m->left.rpm*1000),(long)(m->right.rpm*1000),
+        (long)(m->left.duty*1000),(long)(m->right.duty*1000),m->left.feedback_valid,m->right.feedback_valid);
 }
-static void motor_stop(void) { MotorApp_Stop(HAL_GetTick()); motor_left=motor_right=0; UART_Printf("MOTOR STOP\r\n"); }
-static void motor_keep(void) { MotorApp_KeepAlive(HAL_GetTick()); }
+static void motor_stop(void) { MotorApp_Stop(Timebase_NowUs()); motor_left=motor_right=0; UART_Printf("MOTOR STOP\r\n"); }
+static void motor_keep(void) { MotorApp_KeepAlive(Timebase_NowUs()); }
 static void motor_duty(void)
 {
-    bool ok=MotorApp_SetDuty(motor_left,motor_right,HAL_GetTick());
-    if (!ok && MotorApp_IsActive()) MotorApp_Stop(HAL_GetTick());
+    bool ok=MotorApp_SetDuty(motor_left,motor_right,Timebase_NowUs());
+    if (!ok && MotorApp_IsActive()) MotorApp_Stop(Timebase_NowUs());
     UART_Printf("MOTOR duty %s\r\n",ok ? "OK" : "REJECTED");
 }
-static void motor_speed(void)
-{
-    bool ok=MotorApp_SetRPM(motor_left,motor_right,HAL_GetTick());
-    if (!ok && MotorApp_IsActive()) MotorApp_Stop(HAL_GetTick());
-    UART_Printf("MOTOR speed %s\r\n",ok ? "OK" : "REJECTED");
-}
-
 static void motion_status(void)
 {
     const MotionAppStatus *a=MotionApp_GetStatus();
@@ -86,7 +80,6 @@ bool TelemetryApp_Init(UART_HandleTypeDef *uart)
         {.cmd="ml", .type=TYPE_FLOAT, .var_ptr=&motor_left},
         {.cmd="mr", .type=TYPE_FLOAT, .var_ptr=&motor_right},
         {.cmd="mdrive", .type=TYPE_NONE, .func=motor_duty},
-        {.cmd="mrun", .type=TYPE_NONE, .func=motor_speed},
         {.cmd="mstop", .type=TYPE_NONE, .func=motor_stop},
         {.cmd="mkeep", .type=TYPE_NONE, .func=motor_keep},
         {.cmd="mstatus", .type=TYPE_NONE, .func=motor_status},

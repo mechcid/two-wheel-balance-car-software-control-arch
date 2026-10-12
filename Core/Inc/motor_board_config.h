@@ -31,16 +31,7 @@
 #define MOTOR_LEFT_ENCODER_REVERSED true /* 让正占空比对应正转速。 */
 #define MOTOR_RIGHT_ENCODER_REVERSED false
 
-/* 先开环检查反馈方向，再整定 PI。禁止把零参数当作可用的闭环参数。 */
-#define MOTOR_SPEED_CONTROL_ALLOWED false
-#define MOTOR_INCREMENTAL_PID false
-#define MOTOR_LEFT_KP 0.0f
-#define MOTOR_LEFT_KI 0.0f
-#define MOTOR_LEFT_KD 0.0f
-#define MOTOR_RIGHT_KP 0.0f
-#define MOTOR_RIGHT_KI 0.0f
-#define MOTOR_RIGHT_KD 0.0f
-#define MOTOR_DUTY_LIMIT 0.40f /* 当前单轮短脉冲测试上限。 */
-#define MOTOR_RPM_LIMIT 120.0f /* 初始软件上限，不代表电机额定参数。 */
-#define MOTOR_PWM_HZ 20000u
+/* 当前仅开环占空比输出，转速为编码器实测反馈。 */
+#define MOTOR_DUTY_LIMIT 0.40f
+/* PWM 频率由 CubeMX 的 TIM3 PSC/ARR 唯一决定，当前 0/3599 = 20 kHz。 */
 #endif

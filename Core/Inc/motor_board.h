@@ -4,7 +4,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* 板级映射和计数参数尚未确认时返回 NULL，不配置或驱动电机引脚。 */
+/* 在 MX_GPIO_Init / MX_TIM1/3/4_Init 之后调用一次。
+ * 检查配置并以零占空比启动计数/PWM，保持 STBY 关闭；失败返回 NULL。 */
 const MotorAppConfig *MotorBoard_Init(void);
 #ifdef __cplusplus
 }

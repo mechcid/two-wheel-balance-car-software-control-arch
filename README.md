@@ -25,13 +25,14 @@ module/base/inc/       底层驱动与基础工具接口、OLED 字模
 module/base/src/       硬件驱动、计时与通用调度实现
 module/overlay_app/inc/ 上层算法与应用接口
 module/overlay_app/src/ 姿态解算、传感器/电机/显示/遥测应用
+module/deferred/       暂存算法，不参与当前构建
 cmake/                 交叉编译工具链及 CubeMX 构建配置
 .vscode/               图形化编译、烧录、调试和代码索引配置
 docs/                  使用说明、必要硬件资料
 build/Debug、Release/  自动生成的编译产物，可删除后重新构建
 ```
 
-添加模块 `.c` 后，在顶层 `CMakeLists.txt` 的 `target_sources` 中登记；`module/base/inc` 和 `module/overlay_app/inc` 均已加入头文件搜索路径，VSCode 的备用头文件路径也已同步。底层驱动及基础工具放在 `base`，PID、速度控制器、姿态算法和应用组合放在 `overlay_app`；两层内部各自区分 `inc` 与 `src`。
+添加模块 `.c` 后，在顶层 `CMakeLists.txt` 的 `target_sources` 中登记；`module/base/inc` 和 `module/overlay_app/inc` 均已加入头文件搜索路径，VSCode 的备用头文件路径也已同步。底层驱动及基础工具放在 `base`，姿态算法和应用组合放在 `overlay_app`；PID 和速度控制器暂存于 `deferred/speed_control`；两层内部各自区分 `inc` 与 `src`。
 
 ## 当前接口
 
@@ -60,13 +61,13 @@ OLED 显示 Roll、Pitch、Yaw 三组姿态角（度，保留一位小数），�
 ## 电机控制接入
 
 已接入两轮电机应用、10 ms 调度与串口命令，驱动为 TB6612，每输出轴圈 1456 计数。
-接线配置集中在 `Core/Inc/motor_board_config.h`；当前 `MOTOR_BOARD_READY=1`，上电默认停止。已实测确认 A=PB1/PWM2/编码器1，B=PB0/PWM1/编码器2；开环上限 ±40%，速度闭环尚未解锁。
-详见 [电机控制接入说明](docs/电机控制接入说明.md)。默认停止、可选开环或 PID 速度闭环，尚未实现整车平衡。
+接线配置集中在 `Core/Inc/motor_board_config.h`；当前 `MOTOR_BOARD_READY=1`，上电默认停止。已实测确认 A=PB1/PWM2/编码器1，B=PB0/PWM1/编码器2；开环上限 ±40%，PID 和速度控制器已移到暂存目录，不参与当前运行。
+当前说明见 [电机开环与测速](docs/电机开环与测速.md)。默认停止，只接受占空比目标并报告实测 RPM；@mrun 已移除。测速和保护使用 DWT 微秒时间，尚未实现整车平衡。旧 [接入记录](docs/电机控制接入说明.md) 保留历史实测。
 
 ## CubeMX 再生成
 
 本次对齐了 I2C2 的 `.ioc`、`i2c.c/.h`、`main.c` 调用与应用层句柄。
-`.ioc` 中 TIM1/TIM4 编码器、TIM3 PWM 尚未通过 CubeMX 完整生成；电机板级初始化暂由手写 `Core/Src/motor_board.c` 负责，当前已启用。再生成时需避免与 tim.c 重复初始化。
+TIM1/TIM4 编码器、TIM3 PWM 参数统一在 `.ioc` 和 `tim.c`：PWM PSC=0、ARR=3599，编码器滤波=6、输入上拉。`motor_board.c` 仅检查配置并启动 HAL，不复位或重写定时器。再生成需保留 TIM3 用户区关闭 CCR 预装载的代码。
 今后用 CubeMX 再生成时，确认 PB10/PB11=I2C2、USART2=PA2/PA3、USART2 中断和 9600 波特率，并检查 `main` 用户区的 模块初始化和 `Scheduler_Run`、UART 回调和 IRQ 是否保留。此次没有通过 CubeMX GUI 完整再生成工程。
 
 默认下载与调试使用 `.vscode/openocd.cfg`：CMSIS-DAP、SWD、100 kHz。无线使用时电脑端为主机、板端接收器连接 SWD 并供电；有线使用时将设备切到有线模式。验证记录见 [DAP 下载调试验证](docs/DAP下载调试验证.md)。
