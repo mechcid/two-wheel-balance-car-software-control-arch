@@ -5,6 +5,9 @@
 #include <stdint.h>
 
 typedef void (*SchedulerFunction)(void *context);
+/*之所以要把函数名和函数输入分离，是因为不同的任务可能有不同数量，不同类型的输入，形参的接口不一定一致。
+ *这个调度文件需要任务函数有一个统一的形式，因此定义一个类型不定的输入指针，至于怎么处理这个指针指向的参数，就是每个任务函数在
+ *内部逻辑中的任务 */
 typedef struct {
     SchedulerFunction function;
     void *context;

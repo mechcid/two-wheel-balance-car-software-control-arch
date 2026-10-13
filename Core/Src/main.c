@@ -77,8 +77,8 @@ static bool sample_available(void)
   return SensorApp_GetStatus()->ready && sample->valid &&
          (uint32_t)(Timebase_NowUs() - sample->timestamp_us) < IMU_TIMEOUT_US;
 }
-static void display_task(void *context)
-{
+static void display_task(void *context){
+  //渲染任务和推送任务被分离了，这里只负责渲染，推到oled的部分被分到了oled_task部分
   (void)context;
   float angles[3];
   MotionApp_GetEuler(angles);
@@ -87,17 +87,20 @@ static void display_task(void *context)
   DisplayApp_Render(MotionApp_GetState(), angles, available);
 }
 
-//区分了两个串口任务，分别是串口打印任务和解析字符串命令任务
+//区分了两个串口任务，分别是串口打印任务
 static void report_task(void *context){
   (void)context;
   TelemetryApp_Report(SensorApp_GetSample(), sample_available());
 }
-static void uart_task(void *context) { (void)context; TelemetryApp_Poll(); }
+//解析字符串命令任务
+static void uart_task(void *context) { 
+  (void)context; TelemetryApp_Poll(); 
+}
 
-static void oled_task(void *context)
-{
+static void oled_task(void *context){
   (void)context;
   /* 100 kHz 下单块约 2.07 ms，额外留出软件开销余量。 */
+  //很大胆的设计，将i2c总线被mpu占用后的剩余量全都用来推oled，我并不是很喜欢这样做，后续可以看看怎么优化
   if (MotionApp_TimeUntilSampleUs() >= 2500U) DisplayApp_Poll();
 }
 static void sensor_retry_task(void *context)
@@ -126,7 +129,7 @@ static SchedulerTask tasks[] = {
 static SensorCalibration calibration = {
   .accel_bias_g = {0.01, 0, 0.2},
   .accel_scale = {-1, -1, -1},//反转一下x，y，z方向上的正负
-  .gyro_bias_dps = {-1.6, +1.5, -0.6},
+  .gyro_bias_dps = {-1.75, +1.4, -0.6},
   .gyro_scale = {1, 1, 1},
 };
 

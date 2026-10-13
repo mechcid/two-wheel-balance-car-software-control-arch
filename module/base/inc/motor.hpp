@@ -1,36 +1,7 @@
 #ifndef MOTOR_HPP
 #define MOTOR_HPP
-#include "encoders.h"
-#include "pin_type.h"
+#include "motor_types.h"
 #include <cmath>
-
-/* 两方向输入加独立 PWM 的驱动板配置。
- * 电平组合必须查实际驱动芯片真值表，不能由此类推断滑行/刹车。
- * 构造只保存配置；begin 在外设配置完成后调用，不启动 PWM/编码器。 */
-struct MotorConfig {
-    GPIO_pin_t direction1;
-    GPIO_pin_t direction2;
-    PWM_pin_t pwm;
-    Encoder *encoder;
-    //描述编码器计数与电机输出轴转速的换算关系，单位为每输出轴转一圈的编码器计数。
-    float counts_per_output_rev;
-    //定义前进，后退，停止的真值表
-    bool forward_in1, forward_in2;
-    bool reverse_in1, reverse_in2;
-    bool idle_in1, idle_in2;
-
-    //速度方向和编码器方向反转选项
-    bool output_reversed = false;
-    bool encoder_reversed = false;
-    float duty_limit = 1.0f;
-};
-
-//记录电机的状态参数，转速，施加占空比，编码器反馈是否有效
-struct MotorState {
-    float rpm = 0;
-    float applied_duty = 0; // 已写入的逻辑占空比，不代表负载上的实测电压。
-    bool feedback_valid = false;// 编码器反馈是否有效，若无效则 rpm 不可靠。
-};
 
 class Motor {
 public:
@@ -44,11 +15,17 @@ public:
 
     bool begin(){
         initialized_ = false;
+        state_.displacement_valid = false;
         state_.feedback_valid = false;
         if (!validConfig()) return false;
         if (!stop()) return false;
         state_.feedback_valid = false;
         initialized_ = Encoder_Init(config_.encoder);
+        if (initialized_) {
+            state_.total_counts = 0;
+            state_.displacement_m = 0;
+            state_.displacement_valid = true;
+        }
         return initialized_;
     }
     const MotorState &state() const { 
@@ -67,17 +44,22 @@ public:
         // 先验证换算因子，避免非法 dt 消耗编码器基准。
         float factor = 60.0f / config_.counts_per_output_rev / dt_s;
         if (!std::isfinite(factor) || !std::isfinite(factor * 32767.0f)) return false;
-        if (!Encoder_Update(config_.encoder)) return false;
-        int32_t delta = config_.encoder->delta_cnt;
-        if (config_.encoder_reversed) delta = -delta;
+        int32_t delta;
+        if (!capture_position(delta)) return false;
         state_.rpm = delta * factor;
         state_.feedback_valid = true;
         return true;
     }
-    //重置编码器的函数
+    /* 重建测速基准前补计尚未读取的位移；正常启停不清累计值。
+     * 失效基准无法恢复缺失计数，displacement_valid 保持 false。 */
     bool rebaseFeedback(){
         state_.feedback_valid = false;
-        return initialized_ && Encoder_Init(config_.encoder);
+        if (!initialized_) return false;
+        int32_t delta;
+        capture_position(delta);
+        bool ready = Encoder_Init(config_.encoder);
+        if (!ready) state_.displacement_valid = false;
+        return ready;
     }
 
     /* 输入范围 -1～1，并受 duty_limit 限制；方向极性只在此统一处理。
@@ -89,7 +71,7 @@ public:
         if (!initialized_) return false;
         if (!std::isfinite(duty)) { stop(); return false; }
 
-        //限制占空比在 -duty_limit 到 duty_limit 之间，默认上下限是正负一
+        //限制占空比在 -duty_limit 到 duty_limit 之间，上限来自单轮配置
         if (duty > config_.duty_limit) duty = config_.duty_limit;
         if (duty < -config_.duty_limit) duty = -config_.duty_limit;
         if (duty == 0) return stop();
@@ -124,12 +106,39 @@ public:
         return true;
     }
 private:
+    /* 位移直接累计整数计数，避免逐帧浮点加法或速度积分误差。 */
+    //引用符号类似于传指针，但引用符号更安全，不能为null，且不能改变引用的对象。相当于直接对传入参数进行修改操作
+    bool capture_position(int32_t &delta){
+        if (!Encoder_Update(config_.encoder)) {
+            state_.displacement_valid = false;
+            return false;
+        }
+        delta = config_.encoder->delta_cnt;
+        if (config_.encoder_reversed) delta = -delta;
+        if ((delta>0 && state_.total_counts>INT64_MAX-delta) ||
+            (delta<0 && state_.total_counts<INT64_MIN-delta)) {
+            state_.displacement_valid = false;
+            return false;
+        }
+        //累积积累总位移
+        int64_t next = state_.total_counts + delta;
+        float meters = (float)((double)next / config_.counts_per_output_rev *
+                               6.283185307179586 * config_.radius_m);
+        if (!std::isfinite(meters)) {
+            state_.displacement_valid = false;
+            return false;
+        }
+        state_.total_counts = next;
+        state_.displacement_m = meters;
+        return true;
+    }
     //校验函数，检测传入的配置参数是否合法，不合法则返回false，合法则返回true
     bool validConfig() const{
         return GPIO_PinValid(config_.direction1) && GPIO_PinValid(config_.direction2) &&
             !(config_.direction1.port == config_.direction2.port && config_.direction1.pin == config_.direction2.pin) &&
             PWM_PinValid(config_.pwm) && config_.encoder &&
             std::isfinite(config_.counts_per_output_rev) && config_.counts_per_output_rev > 0 &&
+            std::isfinite(config_.radius_m) && config_.radius_m > 0 &&
             std::isfinite(config_.duty_limit) && config_.duty_limit > 0 && config_.duty_limit <= 1 &&
             (config_.forward_in1 != config_.reverse_in1 || config_.forward_in2 != config_.reverse_in2);
     }

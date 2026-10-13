@@ -7,6 +7,8 @@
 #include <math.h>
 #include <limits.h>
 
+//这个文件的任务就是进行串口任务相关的包装，包括想要用上层命令调用什么函数，打印什么东西
+
 static UART_Debug_t *debug;
 static int stream = 1;
 static bool initialized;
@@ -31,12 +33,14 @@ static void motor_status(void)
         (unsigned long)m->timestamp_us,(unsigned long)m->faults);
     UART_Printf("WHEEL L=%ld R=%ld mrpm dutyL=%ld dutyR=%ld permille valid=%u,%u\r\n",
         (long)(m->left.rpm*1000),(long)(m->right.rpm*1000),
-        (long)(m->left.duty*1000),(long)(m->right.duty*1000),m->left.feedback_valid,m->right.feedback_valid);
+        (long)(m->left.applied_duty*1000),(long)(m->right.applied_duty*1000),m->left.feedback_valid,m->right.feedback_valid);
+    UART_Printf("WHEEL travelL=%ld travelR=%ld mm valid=%u,%u\r\n",
+        milli(m->left.displacement_m),milli(m->right.displacement_m),
+        m->left.displacement_valid,m->right.displacement_valid);
 }
 static void motor_stop(void) { MotorApp_Stop(Timebase_NowUs()); motor_left=motor_right=0; UART_Printf("MOTOR STOP\r\n"); }
 static void motor_keep(void) { MotorApp_KeepAlive(Timebase_NowUs()); }
-static void motor_duty(void)
-{
+static void motor_duty(void){
     bool ok=MotorApp_SetDuty(motor_left,motor_right,Timebase_NowUs());
     if (!ok && MotorApp_IsActive()) MotorApp_Stop(Timebase_NowUs());
     UART_Printf("MOTOR duty %s\r\n",ok ? "OK" : "REJECTED");
@@ -71,8 +75,8 @@ static void status(void)
         (unsigned long)debug->rx_dropped, (unsigned long)debug->tx_dropped,
         (unsigned long)debug->uart_errors, (unsigned long)debug->tx_errors);
 }
-bool TelemetryApp_Init(UART_HandleTypeDef *uart)
-{
+bool TelemetryApp_Init(UART_HandleTypeDef *uart){
+    //进行串口调试实例的初始化，注册命令表，打印启动信息
     if (initialized) return debug->huart == uart;
     debug = UART_Debug_Init(uart);
     if (!debug) return false;
@@ -88,22 +92,26 @@ bool TelemetryApp_Init(UART_HandleTypeDef *uart)
         {.cmd="stream", .type=TYPE_INT, .var_ptr=&stream},
         {.cmd="pose", .type=TYPE_NONE, .func=motion_status},
     };
+
+    //在这里，将调试命令一条条注册，全都注册成功就将initialized设为true
     for (unsigned i=0; i<sizeof(commands)/sizeof(commands[0]); ++i)
         if (UART_Debug_Register(&commands[i]) != 0) return false;
     initialized = true;
     UART_Printf("BOOT IMU: timestamp_us,sequence,ax_mg,ay_mg,az_mg,gx_mdps,gy_mdps,gz_mdps\r\n");
     return true;
 }
-void TelemetryApp_Poll(void)
-{
-    if (!initialized) return;
+void TelemetryApp_Poll(void){
+    if (!initialized) return;   //检验初始化状态，失败则返回
+    //先检验有没有接收到调试命令，接收到了才去处理命令，触发对应的调试效果，一个优化，避免空转，值得学习
     UART_Debug_t *pending = UART_Debug_Poll();
     if (pending) UART_Debug_Process(pending);
 }
-void TelemetryApp_Report(const ImuSample *sample, bool available)
-{
+
+//决定要通过串口输出什么
+void TelemetryApp_Report(const ImuSample *sample, bool available){
     if (!initialized || !stream || !sample || !sample->valid || !available) return;
     if (stream==2) {
+        //输出姿态信息，包含时间戳、有效性、加速度可信度、断点标记和欧拉角
         const MotionState *s=MotionApp_GetState();
         float angles[3]; MotionApp_GetEuler(angles);
         UART_Printf("POSE_US,%lu,%u,%ld,%ld,%ld\r\n",
@@ -112,9 +120,14 @@ void TelemetryApp_Report(const ImuSample *sample, bool available)
         return;
     }
     /* 将物理量放大后以整数输出，避免引入浮点 printf；用新标记区分协议。 */
+    //看矫正后的MPU6050数据
     UART_Printf("IMU,%lu,%lu,%ld,%ld,%ld,%ld,%ld,%ld\r\n",
         (unsigned long)sample->timestamp_us, (unsigned long)sample->sequence,
-        (long)(sample->data.accel[0]*1000), (long)(sample->data.accel[1]*1000), (long)(sample->data.accel[2]*1000),
+        (long)(sample->data.accel[0]*1000), 
+        (long)(sample->data.accel[1]*1000), 
+        (long)(sample->data.accel[2]*1000),
+
         (long)(sample->data.gyro[0]*1000),
-        (long)(sample->data.gyro[1]*1000), (long)(sample->data.gyro[2]*1000));
+        (long)(sample->data.gyro[1]*1000), 
+        (long)(sample->data.gyro[2]*1000));
 }

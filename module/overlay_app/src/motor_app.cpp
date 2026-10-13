@@ -2,9 +2,7 @@
 #include "motor.hpp"
 #include <new>
 
-namespace {
-Encoder left_encoder{};
-Encoder right_encoder{};
+namespace {//匿名命名空间，作用类似于static，花括号内的内容只在当前文件内部可见
 alignas(Motor) unsigned char left_motor_storage[sizeof(Motor)];
 alignas(Motor) unsigned char right_motor_storage[sizeof(Motor)];
 Motor *left_motor{};
@@ -21,43 +19,23 @@ bool initialized;
 constexpr uint32_t command_timeout_us = 1000000;
 constexpr uint32_t max_control_gap_us = 50000;
 
-//用于构建两个电机不同的配置
-MotorConfig make_motor_config(const MotorWheelConfig &wheel, Encoder &encoder){
-    encoder.timer = wheel.encoder_timer;
-    MotorConfig c{};
-    c.direction1=wheel.direction1; c.direction2=wheel.direction2; c.pwm=wheel.pwm;
-    c.encoder=&encoder; c.counts_per_output_rev=wheel.counts_per_rev;
-    c.output_reversed=wheel.output_reversed; c.encoder_reversed=wheel.encoder_reversed;
-    c.duty_limit=config.duty_limit;
-    c.forward_in1=config.forward_in1; c.forward_in2=config.forward_in2;
-    c.reverse_in1=config.reverse_in1; c.reverse_in2=config.reverse_in2;
-    c.idle_in1=config.idle_in1; c.idle_in2=config.idle_in2;
-    return c;
-}
-bool stop_motor(Motor &motor)
-{
+bool stop_motor(Motor &motor){
     bool stopped = motor.stop();
     bool rebased = motor.rebaseFeedback();
     return stopped && rebased;
 }
-bool update_motor(Motor &motor, float target_duty, float dt)
-{
+
+bool update_motor(Motor &motor, float target_duty, float dt){
     if (!motor.updateFeedback(dt)) return false;
     return status.mode!=MOTOR_DUTY || motor.setDuty(target_duty);
-}
-
-MotorWheelStatus read_status(const Motor &motor)
-{
-    const auto &s = motor.state();
-    return {s.rpm, s.applied_duty, s.feedback_valid};
 }
 
 //用于更新记录两个电机的状态，并且给更新的数据打上时间戳记录，输出到串口
 //本身并不参与电机逻辑上的组织
 void snapshot(uint32_t now)
 {
-    status.left = read_status(*left_motor);
-    status.right = read_status(*right_motor);
+    status.left = left_motor->state();
+    status.right = right_motor->state();
     status.timestamp_us = now;
 }
 void fault(uint32_t now)
@@ -66,32 +44,34 @@ void fault(uint32_t now)
     status.mode = MOTOR_FAULT;
     status.faults++;
 }
-bool request_valid(float left, float right, float limit)
+bool request_valid(float left, float right)
 {
     return initialized && status.mode != MOTOR_FAULT &&
         std::isfinite(left) && std::isfinite(right) &&
-        std::fabs(left) <= limit && std::fabs(right) <= limit;
+        std::fabs(left) <= config.left.duty_limit && std::fabs(right) <= config.right.duty_limit;
 }
 }
 
-bool MotorApp_Init(const MotorAppConfig *settings, uint32_t now)
-{
+bool MotorApp_Init(const MotorAppConfig *settings, uint32_t now){
     if (initialized || left_motor) return false; // 仅启动时初始化一次，避免重复构造硬件所有者。
-    if (!settings || !std::isfinite(settings->duty_limit) || settings->duty_limit <= 0 ||
-        settings->duty_limit > 1)
+    //校验传入配置的合法性，主要是检查编码器和占空比限制
+    if (!settings || !settings->set_driver_enabled ||
+        !std::isfinite(settings->left.duty_limit) || settings->left.duty_limit<=0 || settings->left.duty_limit>1 ||
+        !std::isfinite(settings->right.duty_limit) || settings->right.duty_limit<=0 || settings->right.duty_limit>1 ||
+        !settings->left.encoder || !settings->right.encoder ||
+        settings->left.encoder==settings->right.encoder ||
+        !settings->left.encoder->timer || !settings->right.encoder->timer ||
+        settings->left.encoder->timer==settings->right.encoder->timer)
         return false;
     config = *settings;
-    if (!config.set_driver_enabled) return false;
     config.set_driver_enabled(false);
-    left_motor = new (left_motor_storage) Motor(
-        make_motor_config(config.left, left_encoder));
+    left_motor = new (left_motor_storage) Motor(config.left);
     if (!left_motor->begin()) {
         left_motor->stop();
         status.mode=MOTOR_FAULT;
         return false;
     }
-    right_motor = new (right_motor_storage) Motor(
-        make_motor_config(config.right, right_encoder));
+    right_motor = new (right_motor_storage) Motor(config.right);
     if (!right_motor->begin()) {
         left_motor->stop();
         right_motor->stop();
@@ -127,7 +107,7 @@ const MotorAppStatus *MotorApp_GetStatus(void) { return &status; }
 
 //暴露出来用于控制两个电机占空比的函数
 bool MotorApp_SetDuty(float left, float right, uint32_t now){
-    if (!request_valid(left,right,config.duty_limit)) return false;
+    if (!request_valid(left,right)) return false;
     if (status.mode!=MOTOR_DUTY) MotorApp_Stop(now);
     if (status.mode==MOTOR_FAULT) return false;
     command.left_duty=left; command.right_duty=right;

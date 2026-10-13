@@ -269,7 +269,7 @@ int8_t UART_Debug_Register(UART_CmdEntry_t *cmd_entry) {
     return 0;
 }
 
-// 解析指定实例收到的命令，所有回执/报错都打到该实例对应的串口
+// 解析UART_Debug_Poll拼装好的命令，指定实例收到的命令，所有回执/报错都打到该实例对应的串口
 int8_t UART_Debug_Process(UART_Debug_t *inst) {
     if (inst == NULL || inst->flag == EMPTY) return -1;
 

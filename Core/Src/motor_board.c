@@ -7,6 +7,9 @@ static const GPIO_pin_t direction_pins[] = {
     {MOTOR_RIGHT_IN1_PORT, MOTOR_RIGHT_IN1_PIN}, {MOTOR_RIGHT_IN2_PORT, MOTOR_RIGHT_IN2_PIN},
     {MOTOR_STBY_PORT, MOTOR_STBY_PIN},
 };
+/* 板级持有编码器，Motor 只引用；静态存储覆盖整个应用生命周期。 */
+static Encoder left_encoder = {.timer=MOTOR_LEFT_ENCODER_TIMER};
+static Encoder right_encoder = {.timer=MOTOR_RIGHT_ENCODER_TIMER};
 static bool hardware_ready;
 static void driver_enable(bool enable)
 {
@@ -15,17 +18,20 @@ static void driver_enable(bool enable)
 static const MotorAppConfig board_config = {
     .left = {.direction1={MOTOR_LEFT_IN1_PORT,MOTOR_LEFT_IN1_PIN},
          .direction2={MOTOR_LEFT_IN2_PORT,MOTOR_LEFT_IN2_PIN},
-         .pwm={TIM3,MOTOR_LEFT_PWM_CHANNEL}, .encoder_timer=MOTOR_LEFT_ENCODER_TIMER,
-         .counts_per_rev=MOTOR_COUNTS_PER_REV,
-         .output_reversed=MOTOR_LEFT_OUTPUT_REVERSED, .encoder_reversed=MOTOR_LEFT_ENCODER_REVERSED},
+         .pwm={TIM3,MOTOR_LEFT_PWM_CHANNEL}, .encoder=&left_encoder,
+         .counts_per_output_rev=MOTOR_COUNTS_PER_REV, .radius_m=MOTOR_WHEEL_RADIUS_M,
+         .output_reversed=MOTOR_LEFT_OUTPUT_REVERSED, .encoder_reversed=MOTOR_LEFT_ENCODER_REVERSED,
+         .duty_limit=MOTOR_DUTY_LIMIT,
+         .forward_in1=true, .forward_in2=false, .reverse_in1=false, .reverse_in2=true,
+         .idle_in1=true, .idle_in2=true},
     .right = {.direction1={MOTOR_RIGHT_IN1_PORT,MOTOR_RIGHT_IN1_PIN},
          .direction2={MOTOR_RIGHT_IN2_PORT,MOTOR_RIGHT_IN2_PIN},
-         .pwm={TIM3,MOTOR_RIGHT_PWM_CHANNEL}, .encoder_timer=MOTOR_RIGHT_ENCODER_TIMER,
-         .counts_per_rev=MOTOR_COUNTS_PER_REV,
-         .output_reversed=MOTOR_RIGHT_OUTPUT_REVERSED, .encoder_reversed=MOTOR_RIGHT_ENCODER_REVERSED},
-    .duty_limit=MOTOR_DUTY_LIMIT,
-    .forward_in1=true, .forward_in2=false, .reverse_in1=false, .reverse_in2=true,
-    .idle_in1=true, .idle_in2=true, /* PWM 零期间为短路制动；总停机时 STBY 拉低。 */
+         .pwm={TIM3,MOTOR_RIGHT_PWM_CHANNEL}, .encoder=&right_encoder,
+         .counts_per_output_rev=MOTOR_COUNTS_PER_REV, .radius_m=MOTOR_WHEEL_RADIUS_M,
+         .output_reversed=MOTOR_RIGHT_OUTPUT_REVERSED, .encoder_reversed=MOTOR_RIGHT_ENCODER_REVERSED,
+         .duty_limit=MOTOR_DUTY_LIMIT,
+         .forward_in1=true, .forward_in2=false, .reverse_in1=false, .reverse_in2=true,
+         .idle_in1=true, .idle_in2=true},
     .set_driver_enabled=driver_enable,
 };
 static bool mapping_valid(void)
@@ -40,7 +46,7 @@ static bool mapping_valid(void)
     }
     unsigned l=board_config.left.pwm.channel, r=board_config.right.pwm.channel;
     if (!((l==3 && r==4) || (l==4 && r==3))) return false;
-    TIM_TypeDef *a=board_config.left.encoder_timer, *b=board_config.right.encoder_timer;
+    TIM_TypeDef *a=board_config.left.encoder->timer, *b=board_config.right.encoder->timer;
     return (a==TIM1 && b==TIM4) || (a==TIM4 && b==TIM1);
 }
 /* 配置只由 MX_TIMx_Init 完成；这里检查关键运行约定，不覆盖 PSC/ARR。 */

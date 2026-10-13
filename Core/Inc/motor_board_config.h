@@ -32,6 +32,7 @@
 #define MOTOR_RIGHT_ENCODER_REVERSED false
 
 /* 当前仅开环占空比输出，转速为编码器实测反馈。 */
+#define MOTOR_WHEEL_RADIUS_M 0.0325f /* 32.5 mm，左右轮相同。 */
 #define MOTOR_DUTY_LIMIT 0.40f
 /* PWM 频率由 CubeMX 的 TIM3 PSC/ARR 唯一决定，当前 0/3599 = 20 kHz。 */
 #endif
