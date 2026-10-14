@@ -33,6 +33,7 @@
 #include "motor_app.h"
 #include "motor_board.h"
 #include "motion_app.h"
+#include "status_state_app.h"
 #include "timebase.h"
 
 /* USER CODE END Includes */
@@ -66,10 +67,10 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-static void motor_task(void *context)
+static void state_task(void *context)
 {
   (void)context;
-  MotorApp_Update(Timebase_NowUs());
+  StatusStateApp_Update(Timebase_NowUs());
 }
 static bool sample_available(void)
 {
@@ -91,9 +92,11 @@ static void display_task(void *context){
 static void report_task(void *context){
   (void)context;
   /* 不需要哪类数据就注释对应调用；@stream 控制全部周期输出。 */
+
   //TelemetryApp_ReportImu(SensorApp_GetSample(), sample_available());
   //TelemetryApp_ReportAttitude(sample_available());
-  TelemetryApp_ReportMotor(MotorApp_GetStatus());
+  //TelemetryApp_ReportMotor(MotorApp_GetStatus());
+  TelemetryApp_ReportState(StatusStateApp_GetState());
 }
 //解析字符串命令任务
 static void uart_task(void *context) { 
@@ -118,10 +121,10 @@ static void oled_retry_task(void *context)
 /* 应用任务的周期统一在此配置；周期为 0 表示每轮主循环都执行。
  * 故障恢复目前会阻塞等待 MPU 复位和稳定，因此不保证硬实时性。 */
 static SchedulerTask tasks[] = {
-  {.function=motor_task,        .period_ms=10,   .enabled=true},
+  {.function=state_task,        .period_ms=10,   .enabled=true},
   {.function=uart_task,         .period_ms=0,    .enabled=true},
   {.function=display_task,      .period_ms=200,  .enabled=true},
-  /* 三类帧共用 9600/8N1，500 ms 周期为命令回执留出带宽。 */
+  /* 周期输出共用 9600/8N1，500 ms 周期为命令回执留出带宽。 */
   {.function=report_task,       .period_ms=500,  .enabled=true},
   {.function=oled_task,         .period_ms=0,    .enabled=true},
   {.function=sensor_retry_task, .period_ms=1000, .enabled=true},
@@ -183,6 +186,7 @@ int main(void)
   /* 加速度输出保留三轴反号；解算内部恢复为右手坐标系中的比力。 */
   MotionConfig motion_config=MotionEstimator_DefaultConfig();
   if (!MotionApp_Init(&motion_config)) Error_Handler();
+  StatusStateApp_Init();
   Scheduler_Init(tasks, TASK_COUNT, HAL_GetTick());
 
   /* USER CODE END 2 */
@@ -195,6 +199,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     MotionApp_Poll(); /* 优先处理 200 Hz 采集截止时间；阻塞式 I2C 不在中断内执行。 */
+    StatusStateApp_Poll(Timebase_NowUs());
     Scheduler_Run(tasks, TASK_COUNT, HAL_GetTick());
   }
   /* USER CODE END 3 */

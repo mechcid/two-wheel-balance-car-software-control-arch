@@ -28,6 +28,9 @@ typedef struct {
     MotorState left;
     MotorState right;
     uint32_t timestamp_us, faults;
+    uint32_t sequence;    /* 每次双轮采样发布递增（含无效帧），自然回绕。初始化不发布。 */
+    uint32_t interval_us; /* 本次与上次采样的间隔；timestamp_us 是区间末端。 */
+    bool valid;          /* 两轮增量同区间有效；不表示未被消费者处理。 */
 } MotorAppStatus;
 
 /* 所有时间参数来自 Timebase_NowUs；主循环约每 10 ms 更新一次。
@@ -39,6 +42,13 @@ void MotorApp_Stop(uint32_t now_us);
 void MotorApp_KeepAlive(uint32_t now_us);
 bool MotorApp_IsActive(void);
 const MotorAppStatus *MotorApp_GetStatus(void);
+/* 主循环同步通知，包括启停补采样和无效帧；初始化前也可注册，NULL 取消。
+ * 回调必须短小，不得调用 MotorApp 的更新/控制接口或保留指针作历史数据。
+ * 里程计在此消费每一帧；GetStatus 仅保留最新帧，低频轮询会漏帧。
+ * 消费者各自保存 sequence，重复帧跳过，跳号/valid=false 标记连续性丢失。
+ * 读取不会清除 valid；控制状态变化本身不产生新采样序号。 */
+typedef void (*MotorAppFeedbackCallback)(const MotorAppStatus *sample);
+void MotorApp_SetFeedbackCallback(MotorAppFeedbackCallback callback);
 #ifdef __cplusplus
 }
 #endif

@@ -30,11 +30,15 @@ typedef struct {
 //记录电机的状态参数，转速，施加占空比，编码器反馈是否有效
 typedef struct {
     float rpm;
+    float velocity_mps; /* 本次采样的有符号轮线速度，m/s，与 rpm 共用 feedback_valid。 */
+    float delta_displacement_m; /* 最近一次采样区间的有符号轮位移，单位米。 */
+    bool delta_valid; /* 单段位移有效性独立于累计行程连续性。 */
     int64_t total_counts; /* 从最近一次成功 begin 起的有符号累计计数。 */
-    float displacement_m; /* total_counts / 每圈计数 × 2πradius_m；轮行程，非车体坐标。 */
-    bool displacement_valid; /* 累计是否连续；丢失基准后不因恢复测速自动变真。 */
+    float signed_travel_m; /* total_counts / 每圈计数 × 2πradius_m；
+                            有符号累计轮行程，前后抵消，就是有正负的总录成。 */
+    bool travel_valid; /* 累计是否连续；丢失基准后不因恢复测速自动变真。 */
     float applied_duty; // 已写入的逻辑占空比，不代表负载上的实测电压。
-    bool feedback_valid;// 编码器反馈是否有效，若无效则 rpm 不可靠。
+    bool feedback_valid;// 编码器反馈是否有效，若无效则 rpm 和 velocity_mps 均不可用。
 } MotorState;
 
 #endif

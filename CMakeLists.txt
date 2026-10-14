@@ -55,6 +55,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     module/base/src/TIM_IT.c
     module/overlay_app/src/motion_estimator.c
     module/overlay_app/src/motion_app.c
+    module/overlay_app/src/odometry_app.c
+    module/overlay_app/src/status_state_app.c
     module/base/src/mpu6050.c
     Core/Src/motor_board.c
     module/base/src/encoders.c
