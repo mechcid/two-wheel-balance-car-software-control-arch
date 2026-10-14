@@ -90,7 +90,10 @@ static void display_task(void *context){
 //区分了两个串口任务，分别是串口打印任务
 static void report_task(void *context){
   (void)context;
-  TelemetryApp_Report(SensorApp_GetSample(), sample_available());
+  /* 不需要哪类数据就注释对应调用；@stream 控制全部周期输出。 */
+  //TelemetryApp_ReportImu(SensorApp_GetSample(), sample_available());
+  //TelemetryApp_ReportAttitude(sample_available());
+  TelemetryApp_ReportMotor(MotorApp_GetStatus());
 }
 //解析字符串命令任务
 static void uart_task(void *context) { 
@@ -118,7 +121,8 @@ static SchedulerTask tasks[] = {
   {.function=motor_task,        .period_ms=10,   .enabled=true},
   {.function=uart_task,         .period_ms=0,    .enabled=true},
   {.function=display_task,      .period_ms=200,  .enabled=true},
-  {.function=report_task,       .period_ms=200,  .enabled=true},
+  /* 三类帧共用 9600/8N1，500 ms 周期为命令回执留出带宽。 */
+  {.function=report_task,       .period_ms=500,  .enabled=true},
   {.function=oled_task,         .period_ms=0,    .enabled=true},
   {.function=sensor_retry_task, .period_ms=1000, .enabled=true},
   {.function=oled_retry_task,   .context=&hi2c2, .period_ms=2000, .enabled=true},

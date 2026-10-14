@@ -2,6 +2,7 @@
 #include "motor_board_config.h"
 #include "tim.h"
 
+//把会用到的引脚写到一起
 static const GPIO_pin_t direction_pins[] = {
     {MOTOR_LEFT_IN1_PORT, MOTOR_LEFT_IN1_PIN}, {MOTOR_LEFT_IN2_PORT, MOTOR_LEFT_IN2_PIN},
     {MOTOR_RIGHT_IN1_PORT, MOTOR_RIGHT_IN1_PIN}, {MOTOR_RIGHT_IN2_PORT, MOTOR_RIGHT_IN2_PIN},
@@ -11,12 +12,14 @@ static const GPIO_pin_t direction_pins[] = {
 static Encoder left_encoder = {.timer=MOTOR_LEFT_ENCODER_TIMER};
 static Encoder right_encoder = {.timer=MOTOR_RIGHT_ENCODER_TIMER};
 static bool hardware_ready;
-static void driver_enable(bool enable)
-{
+
+//开STBY，使能电机旋转
+static void driver_enable(bool enable){
     if (hardware_ready) GPIO_Write(direction_pins[4],enable);
 }
 static const MotorAppConfig board_config = {
-    .left = {.direction1={MOTOR_LEFT_IN1_PORT,MOTOR_LEFT_IN1_PIN},
+    .left = {
+         .direction1={MOTOR_LEFT_IN1_PORT,MOTOR_LEFT_IN1_PIN},
          .direction2={MOTOR_LEFT_IN2_PORT,MOTOR_LEFT_IN2_PIN},
          .pwm={TIM3,MOTOR_LEFT_PWM_CHANNEL}, .encoder=&left_encoder,
          .counts_per_output_rev=MOTOR_COUNTS_PER_REV, .radius_m=MOTOR_WHEEL_RADIUS_M,
@@ -24,7 +27,9 @@ static const MotorAppConfig board_config = {
          .duty_limit=MOTOR_DUTY_LIMIT,
          .forward_in1=true, .forward_in2=false, .reverse_in1=false, .reverse_in2=true,
          .idle_in1=true, .idle_in2=true},
-    .right = {.direction1={MOTOR_RIGHT_IN1_PORT,MOTOR_RIGHT_IN1_PIN},
+
+    .right = {
+         .direction1={MOTOR_RIGHT_IN1_PORT,MOTOR_RIGHT_IN1_PIN},
          .direction2={MOTOR_RIGHT_IN2_PORT,MOTOR_RIGHT_IN2_PIN},
          .pwm={TIM3,MOTOR_RIGHT_PWM_CHANNEL}, .encoder=&right_encoder,
          .counts_per_output_rev=MOTOR_COUNTS_PER_REV, .radius_m=MOTOR_WHEEL_RADIUS_M,
@@ -34,8 +39,9 @@ static const MotorAppConfig board_config = {
          .idle_in1=true, .idle_in2=true},
     .set_driver_enabled=driver_enable,
 };
-static bool mapping_valid(void)
-{
+
+//校验一下合法性，确定起的宏别名与stm32的HAL定义不冲突
+static bool mapping_valid(void){
     for (unsigned i=0; i<5; ++i) {
         GPIO_pin_t p=direction_pins[i];
         if (!GPIO_PinValid(p)) return false;
@@ -64,8 +70,9 @@ static bool hardware_valid(void)
         !(TIM3->CCMR2 & (TIM_CCMR2_OC3PE | TIM_CCMR2_OC4PE)) &&
         !(TIM3->CCER & (TIM_CCER_CC3P | TIM_CCER_CC4P));
 }
-const MotorAppConfig *MotorBoard_Init(void)
-{
+
+//校验一下硬件合法性
+const MotorAppConfig *MotorBoard_Init(void){
     static bool attempted;
     if (attempted || !MOTOR_BOARD_READY || !mapping_valid()) return NULL;
     attempted=true;

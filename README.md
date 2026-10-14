@@ -47,14 +47,14 @@ OLED 显示 Roll、Pitch、Yaw 三组姿态角（度，保留一位小数），�
 
 主循环按 5 ms 固定截止时间优先采集并解算姿态；DWT 时间模块处理周期计数回绕，姿态 dt 来自相邻成功样本的微秒时间戳。其他任务仍由 `scheduler` 调度。OLED 每次发送前要求至少 2.5 ms 采集余量。`sensor_app` 发布 `ImuSample`：校准后的 g、°/s、微秒时间戳、软件发布序号和有效标志，20 ms 未更新视为过期。main 传入当前校准配置；传 NULL 才采用零偏 0、比例 1。
 
-串口每约 200 ms 输出 `IMU,微秒,sequence,AX_mg,AY_mg,AZ_mg,GX_mdps,GY_mdps,GZ_mdps`，各物理量乘 1000 后以整数传输。温度列已删除，旧 `MPU_C` 解析程序需要更新。
+IMU 周期打印输出 `IMU,微秒,sequence,AX_mg,AY_mg,AZ_mg,GX_mdps,GY_mdps,GZ_mdps`，各物理量乘 1000 后以整数传输。温度列已删除，旧 `MPU_C` 解析程序需要更新。
 命令须以 CRLF 结尾：`@ping`、`@status`、`@stream:0` / `@stream:1`。
 命令数值使用轻量十进制解析，支持正负整数和普通小数，不支持科学计数法、空白或特殊浮点值；格式、精度和体积变化见 [UART 数值解析优化说明](docs/UART数值解析优化说明.md)。
 `@status` 包含修正样本有效性、OLED、MPU 和 UART 状态。原始数据诊断不再作为普通交互命令；底层尾字节保护仍保留，原因见 [I²C 尾字节诊断](docs/i2c_tail_diagnostic.md)。
 
 ## 姿态估计
 
-`motion_estimator` 仅融合加速度计和陀螺仪估计姿态，`motion_app` 负责采集与实际 dt，`timebase` 提供统一微秒时间，`TIM_IT` 保留为未启动的 TIM2 节拍工具。`@pose` 查看状态，`@stream:2` 输出 `POSE_US,时间_us,valid,roll_mdeg,pitch_mdeg,yaw_mdeg`。旧帧末尾的 X/Y/Z 位移字段和 `@pzero`、`@still` 命令已删除。
+`motion_estimator` 仅融合加速度计和陀螺仪估计姿态，`motion_app` 负责采集与实际 dt，`timebase` 提供统一微秒时间，`TIM_IT` 保留为未启动的 TIM2 节拍工具。`@pose` 查看状态，独立的 `TelemetryApp_ReportAttitude()` 输出 `POSE_US,时间_us,valid,roll_mdeg,pitch_mdeg,yaw_mdeg`。旧帧末尾的 X/Y/Z 位移字段和 `@pzero`、`@still` 命令已删除。
 
 已取消 IMU 速度、位移积分。后续将用编码器实现小车位移估计，目前尚未加入编码器里程计算。详见 [当前实现说明](docs/MPU6050仅姿态估计调整说明.md)。
 
@@ -71,3 +71,15 @@ TIM1/TIM4 编码器、TIM3 PWM 参数统一在 `.ioc` 和 `tim.c`：PWM PSC=0、
 今后用 CubeMX 再生成时，确认 PB10/PB11=I2C2、USART2=PA2/PA3、USART2 中断和 9600 波特率，并检查 `main` 用户区的 模块初始化和 `Scheduler_Run`、UART 回调和 IRQ 是否保留。此次没有通过 CubeMX GUI 完整再生成工程。
 
 默认下载与调试使用 `.vscode/openocd.cfg`：CMSIS-DAP、SWD、100 kHz。无线使用时电脑端为主机、板端接收器连接 SWD 并供电；有线使用时将设备切到有线模式。验证记录见 [DAP 下载调试验证](docs/DAP下载调试验证.md)。
+
+## 周期串口输出
+
+`main.c` 的 `report_task()` 分别调用 `TelemetryApp_ReportImu`、`TelemetryApp_ReportAttitude`、`TelemetryApp_ReportMotor`。注释某一行即可关闭该类输出，三者可以同时启用。当前全部启用，每 500 ms 输出一次，为 9600/8N1 串口的命令及回执留出余量。
+
+`@stream:0` 暂停全部周期输出，`@stream:1` 恢复；其他非零值也表示恢复，`@stream:2` 不再单独选择姿态。`@pose`、`@mstatus`、`@status` 等手动查询不受总开关限制。
+
+- `IMU,timestamp_us,sequence,ax_mg,ay_mg,az_mg,gx_mdps,gy_mdps,gz_mdps`：只输出有效且新鲜样本。
+- `POSE_US,timestamp_us,valid,roll_mdeg,pitch_mdeg,yaw_mdeg`：失效或过期时输出 valid=0，角度为保留值。
+- `MOTOR,timestamp_us,mode,left_mrpm,right_mrpm,left_mm,right_mm,left_speed_valid,right_speed_valid,left_distance_valid,right_distance_valid`：停止和故障状态也输出，数值是否可用由标志指明。mode=0/1/2/3 分别为 STOPPED/DUTY/FAULT/UNCONFIGURED。
+
+以上物理量以整数发送（mrpm 为 RPM×1000，mm 为 m×1000）。格式按 32 位最宽数值估算，每轮三帧共 233 字节，500 ms 周期约 466 字节/秒，低于 9600/8N1 的 960 字节/秒；大量手动查询仍可能填满发送队列，可用 @status 查看 tx_drop。

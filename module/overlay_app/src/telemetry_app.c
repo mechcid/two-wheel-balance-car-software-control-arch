@@ -97,7 +97,7 @@ bool TelemetryApp_Init(UART_HandleTypeDef *uart){
     for (unsigned i=0; i<sizeof(commands)/sizeof(commands[0]); ++i)
         if (UART_Debug_Register(&commands[i]) != 0) return false;
     initialized = true;
-    UART_Printf("BOOT IMU: timestamp_us,sequence,ax_mg,ay_mg,az_mg,gx_mdps,gy_mdps,gz_mdps\r\n");
+    UART_Printf("BOOT telemetry: IMU / POSE_US / MOTOR; stream 0=off, nonzero=on\r\n");
     return true;
 }
 void TelemetryApp_Poll(void){
@@ -107,27 +107,39 @@ void TelemetryApp_Poll(void){
     if (pending) UART_Debug_Process(pending);
 }
 
-//决定要通过串口输出什么
-void TelemetryApp_Report(const ImuSample *sample, bool available){
+/* 三个输出入口互不选择、不自行调度；stream 只作为总开关，写零就表示关掉打印。 */
+
+//打印IMU的矫正数据
+void TelemetryApp_ReportImu(const ImuSample *sample, bool available){
     if (!initialized || !stream || !sample || !sample->valid || !available) return;
-    if (stream==2) {
-        //输出姿态信息，包含时间戳、有效性、加速度可信度、断点标记和欧拉角
-        const MotionState *s=MotionApp_GetState();
-        float angles[3]; MotionApp_GetEuler(angles);
-        UART_Printf("POSE_US,%lu,%u,%ld,%ld,%ld\r\n",
-            (unsigned long)MotionApp_GetStatus()->timestamp_us,s->valid,
-            milli(angles[0]),milli(angles[1]),milli(angles[2]));
-        return;
-    }
-    /* 将物理量放大后以整数输出，避免引入浮点 printf；用新标记区分协议。 */
-    //看矫正后的MPU6050数据
     UART_Printf("IMU,%lu,%lu,%ld,%ld,%ld,%ld,%ld,%ld\r\n",
         (unsigned long)sample->timestamp_us, (unsigned long)sample->sequence,
-        (long)(sample->data.accel[0]*1000), 
-        (long)(sample->data.accel[1]*1000), 
-        (long)(sample->data.accel[2]*1000),
+        milli(sample->data.accel[0]), milli(sample->data.accel[1]), milli(sample->data.accel[2]),
+        milli(sample->data.gyro[0]), milli(sample->data.gyro[1]), milli(sample->data.gyro[2]));
+}
 
-        (long)(sample->data.gyro[0]*1000),
-        (long)(sample->data.gyro[1]*1000), 
-        (long)(sample->data.gyro[2]*1000));
+//打印姿态数据
+void TelemetryApp_ReportAttitude(bool available){
+    if (!initialized || !stream) return;
+    const MotionState *state=MotionApp_GetState();
+    uint32_t timestamp=MotionApp_GetStatus()->timestamp_us;
+    bool valid=available && state->valid &&
+        (uint32_t)(Timebase_NowUs()-timestamp)<IMU_TIMEOUT_US;
+    float angles[3];
+    MotionApp_GetEuler(angles);
+    /* 无效时仍发 valid=0，角度仅为保留值，不冒充新鲜结果。 */
+    UART_Printf("POSE_US,%lu,%u,%ld,%ld,%ld\r\n",
+        (unsigned long)timestamp,valid,milli(angles[0]),milli(angles[1]),milli(angles[2]));
+}
+
+//打印两轮速度和位移数据
+void TelemetryApp_ReportMotor(const MotorAppStatus *motor){
+    if (!initialized || !stream || !motor) return;
+    /* 停止状态也输出，便于观察手动转轮；无效数值由对应标志指明。 */
+    UART_Printf("MOTOR,%luus,%u,l %ld rpm,r %ld rpm,l %ld d,r %ld d,%u,%u,%u,%u\r\n",
+        (unsigned long)motor->timestamp_us,(unsigned)motor->mode,
+        milli(motor->left.rpm),milli(motor->right.rpm),
+        milli(motor->left.displacement_m),milli(motor->right.displacement_m),
+        motor->left.feedback_valid,motor->right.feedback_valid,
+        motor->left.displacement_valid,motor->right.displacement_valid);
 }
