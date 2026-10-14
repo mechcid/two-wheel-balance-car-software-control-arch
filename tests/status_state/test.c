@@ -44,7 +44,7 @@ int main(void) {
     OdometryApp_Update(&o,0,0,(0)*100,(0)*100,1.570796327f,1,10000,10000,true);
     OdometryApp_Update(&o,0.02f,0.02f,(0.02f)*100,(0.02f)*100,1.570796327f,2,20000,10000,true);
     near(o.x_m,0); near(o.y_m,0.02f);
-    StatusStateApp_Init(); pose.valid=true; imu.valid=true;
+    assert(StatusStateApp_Init(0.0325f,0.0325f)); pose.valid=true; imu.valid=true;
     frame(10000,1,0,0); assert(StatusStateApp_GetState()->valid);
     frame(20000,2,0.01f,0.03f);
     motor.sequence++; motor.left.velocity_mps=3; motor.right.velocity_mps=5;
@@ -55,7 +55,7 @@ int main(void) {
     motor.sequence=4; motor.timestamp_us=21000; motor.valid=false;
     StatusStateApp_Update(21000); assert(!StatusStateApp_GetState()->valid);
     assert(StatusStateApp_GetState()->faults&STATUS_STATE_MOTOR_INVALID);
-    StatusStateApp_Init(); frame(20000,2,0,0);
+    assert(StatusStateApp_Init(0.0325f,0.0325f)); frame(20000,2,0,0);
     seq=StatusStateApp_GetState()->sequence;
     angles[0]=30; angles[1]=20; angles[2]=179;
     imu.data.gyro[1]=10; imu.data.gyro[2]=20;
@@ -71,12 +71,34 @@ int main(void) {
     frame(80000,6,0.01f,0.01f);
     assert(!StatusStateApp_GetState()->valid);
     assert(StatusStateApp_GetState()->faults&STATUS_STATE_POSITION_DISCONTINUOUS);
-    StatusStateApp_Init(); angles[0]=angles[1]=angles[2]=0;
+    assert(StatusStateApp_Init(0.0325f,0.0325f)); angles[0]=angles[1]=angles[2]=0;
     frame(100000,1,0,0); pose.valid=false; StatusStateApp_Poll(100001);
     pose.valid=true; frame(110000,2,0,0); assert(!StatusStateApp_GetState()->valid);
     motor.sequence++; motor.left.feedback_valid=false; callback(&motor);
     assert(StatusStateApp_GetState()->faults&STATUS_STATE_MOTOR_INVALID);
-    StatusStateApp_Init(); angles[1]=90; frame(120000,1,0,0);
+    assert(StatusStateApp_Init(0.0325f,0.0325f)); angles[1]=90; frame(120000,1,0,0);
     assert(StatusStateApp_GetState()->faults&STATUS_STATE_ATTITUDE_INVALID);
+    // 两轮对地不转：编码器读数为 -radius * theta，补偿后 v/x/y 应为零。
+    assert(!StatusStateApp_Init(0,0.0325f));
+    assert(!StatusStateApp_Init(NAN,0.0325f));
+    assert(StatusStateApp_Init(0.03f,0.04f));
+    angles[0]=angles[1]=angles[2]=0;
+    imu.data.gyro[1]=imu.data.gyro[2]=0;
+    frame(130000,1,0,0);
+    const float pitch_step=0.01f;
+    angles[1]=pitch_step/0.01745329252f;
+    imu.data.gyro[1]=1/0.01745329252f;
+    frame(140000,2,-0.03f*pitch_step,-0.04f*pitch_step);
+    assert(StatusStateApp_GetVector(v)); near(v[0],0); near(v[1],0); near(v[4],0);
+    callback(&motor); near(StatusStateApp_GetState()->x_m,0);
+    // 相反方向俯仰也抵消，使用不同轮半径以验证逐轮换算。
+    angles[1]=0; imu.data.gyro[1]=-1/0.01745329252f;
+    frame(150000,3,0.03f*pitch_step,0.04f*pitch_step);
+    assert(StatusStateApp_GetVector(v)); near(v[0],0); near(v[4],0);
+    // 同时真实前进 1 mm，补偿只消除车身俯仰部分。
+    angles[1]=pitch_step/0.01745329252f; imu.data.gyro[1]=1/0.01745329252f;
+    frame(160000,4,0.001f-0.03f*pitch_step,0.001f-0.04f*pitch_step);
+    assert(StatusStateApp_GetVector(v)); near(v[0],0.001f); near(v[4],0.1f);
+    puts("PASS: body pitch compensation, both signs, unequal radii, translation plus pitch");
     puts("PASS: signed odometry, wrap/midpoint, duplicate/missed samples, state order/units/rates, stale data and continuity");
 }

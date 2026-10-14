@@ -182,11 +182,13 @@ int main(void)
   if (!TelemetryApp_Init(&huart2)) Error_Handler();
   SensorApp_Init(&hi2c2, &calibration); // 初始化传感器应用，传入 I2C 总线和校准参数
   DisplayApp_Init(&hi2c2);
-  MotorApp_Init(MotorBoard_Init(), Timebase_NowUs());
+  const MotorAppConfig *motor_config=MotorBoard_Init();
+  MotorApp_Init(motor_config, Timebase_NowUs());
   /* 加速度输出保留三轴反号；解算内部恢复为右手坐标系中的比力。 */
   MotionConfig motion_config=MotionEstimator_DefaultConfig();
   if (!MotionApp_Init(&motion_config)) Error_Handler();
-  StatusStateApp_Init();
+  if (motor_config && !StatusStateApp_Init(motor_config->left.radius_m,
+                                           motor_config->right.radius_m)) Error_Handler();
   Scheduler_Init(tasks, TASK_COUNT, HAL_GetTick());
 
   /* USER CODE END 2 */

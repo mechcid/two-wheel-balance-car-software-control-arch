@@ -14,7 +14,7 @@ StatusStateApp_GetState 返回带命名成员、时间戳、序号和错误位�
 
 ## 坐标与单位（接入 K 前必须核对）
 
-x/y 单位 m，是轮轴中点在姿态固定参考系中的估计位置；车身 +X 必须对应两轮反馈正向，Z 向上，绕 +Z 的正转由 +X 转向 +Y。theta 使用当前姿态 pitch、绕 +Y，单位 rad；未增加安装偏角或符号修正。psi 使用 yaw 并连续展开，不在 ±π 处跳变，其零点沿用姿态启动航向。v 单位 m/s，为两轮 velocity_mps 的平均值，每轮由本次 RPM 与各自半径换算，不是非负速度模长，也不是瞬时端点速度。theta_dot、psi_dot 单位 rad/s，按 ZYX 欧拉角运动学由校准后的机体系陀螺仪求得：
+x/y 单位 m，是轮轴中点在姿态固定参考系中的估计位置；车身 +X 必须对应两轮反馈正向，Z 向上，绕 +Z 的正转由 +X 转向 +Y。theta 使用当前姿态 pitch、绕 +Y，单位 rad；未增加安装偏角或符号修正。psi 使用 yaw 并连续展开，不在 ±π 处跳变，其零点沿用姿态启动航向。v 单位 m/s，为两轮 velocity_mps 加回车身俯仰分量后的平均值，每轮原始线速度由本次 RPM 与各自半径换算，不是非负速度模长，也不是瞬时端点速度。theta_dot、psi_dot 单位 rad/s，按 ZYX 欧拉角运动学由校准后的机体系陀螺仪求得：
 
 ```
 theta_dot = gyro_y*cos(roll) - gyro_z*sin(roll)
@@ -52,3 +52,19 @@ faults 是当前位掩码（不是故障次数）：
 周期格式：STATE,timestamp_us,sequence,valid,faults,x_mm,y_mm,theta_mrad,psi_mrad,v_mmps,theta_dot_mradps,psi_dot_mradps。faults 为十六进制，其余整数为十进制；当前周期为 500 ms。
 
 bash tests/status_state/run.sh 覆盖前后运动、两轮平均、重复/漏帧、序号及时间回绕、中间航向跨界、状态顺序和单位、欧拉角导数、过期/姿态失效与位置连续性。该测试模拟输入，不替代轮轴坐标方向与真实时间抖动的实机验证。
+
+
+## 车身俯仰补偿
+
+编码器测量轮子相对车身的转动。在当前约定（theta 为绕 +Y 的 pitch，车轮正转对应车体 +X 前进）下，omega_encoder = omega_absolute - theta_dot。因此在状态估计层逐轮修正：
+
+```
+v_absolute = velocity_mps + radius_m * theta_dot
+delta_s_absolute = delta_displacement_m + radius_m * (theta_now - theta_previous)
+```
+
+底层 MotorState 保留相对车身的编码器反馈，不改变电机方向或标定。状态模块初始化改为 StatusStateApp_Init(left_radius_m, right_radius_m)，从现有 MotorConfig 复制轮半径，拒绝非有限或非正半径；不另写一套轮子参数。修正后的双轮行程与速度交给 odometry_app。
+
+位移使用相邻有效姿态的角度差，不积分速度。首次样本只建立基准；无效/漏帧沿用原连续性失效规则，恢复时不跨缺失区间补算俯仰。该补偿沿用平面、小侧倾的平衡车模型，以及现有姿态与编码器最多 7.5 ms 的时间偏差；不是严格同时刻测量，动态变化时仍有残差。速度也仍含编码器区间平均值与姿态末端角速度之间的近似。
+
+新增模拟测试：轮子对地静止时正/反俯仰，两轮半径不同，俯仰与真实平移同时发生，以及重复读取。静止轮测试应得到接近零的 x/y/v；实际安装符号还需固定轮子并俯仰车身验证，未声称已在实车消除残差。

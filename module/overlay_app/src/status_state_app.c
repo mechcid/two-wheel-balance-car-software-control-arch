@@ -9,6 +9,8 @@ static StatusState state;
 static OdometryState odometry;
 static bool have_sample, have_yaw;
 static float last_wrapped_yaw;
+static float left_radius_m, right_radius_m, last_pitch_rad;
+static bool have_pitch;
 /* 200 Hz 姿态相对电机采样允许最多 7.5 ms 延迟；状态超过 20 ms 禁用。
  * 这是有界时间偏差，不是硬件同步；不外推旧姿态来冒充新测量。 */
 static const uint32_t max_attitude_age_us=7500, state_timeout_us=20000;
@@ -34,8 +36,19 @@ static void on_motor_feedback(const MotorAppStatus *m){
     float psi_dot=(fabsf(cp)>0.1f) ? (q*sinf(roll)+r*cosf(roll))/cp : NAN;
     if (!isfinite(roll) || !isfinite(theta) || !isfinite(psi) ||
         !isfinite(theta_dot) || !isfinite(psi_dot)) faults|=STATUS_STATE_ATTITUDE_INVALID;
-    OdometryApp_Update(&odometry,m->left.delta_displacement_m,m->right.delta_displacement_m,
-        m->left.velocity_mps,m->right.velocity_mps,psi,m->sequence,m->timestamp_us,m->interval_us,faults==0);
+    // 编码器是相对车身的轮转角：绝对轮角 = 编码器轮角 + theta。
+    // 位置用角度增量修正，不把末端角速度乘 dt 冒充整个区间的转角。
+    bool pitch_ready=have_pitch && have_sample &&
+        (uint32_t)(m->sequence-state.motor_sequence)==1;
+    float delta_pitch=pitch_ready ? theta-last_pitch_rad : 0;
+    float left_step=m->left.delta_displacement_m+left_radius_m*delta_pitch;
+    float right_step=m->right.delta_displacement_m+right_radius_m*delta_pitch;
+    float left_v=m->left.velocity_mps+left_radius_m*theta_dot;
+    float right_v=m->right.velocity_mps+right_radius_m*theta_dot;
+    OdometryApp_Update(&odometry,left_step,right_step,left_v,right_v,
+        psi,m->sequence,m->timestamp_us,m->interval_us,faults==0);
+    have_pitch=faults==0;
+    if (have_pitch) last_pitch_rad=theta;
     if (!odometry.initialized || !odometry.continuous || !odometry.valid)
         faults|=STATUS_STATE_POSITION_DISCONTINUOUS;
     state.x_m=odometry.x_m; state.y_m=odometry.y_m; state.v_mps=odometry.v_mps;
@@ -55,11 +68,16 @@ static void on_motor_feedback(const MotorAppStatus *m){
     state.valid=faults==0;
     have_sample=true;
 }
-void StatusStateApp_Init(void)
+bool StatusStateApp_Init(float left_radius, float right_radius)
 {
+    if (!isfinite(left_radius) || left_radius<=0 ||
+        !isfinite(right_radius) || right_radius<=0) return false;
+    left_radius_m=left_radius; right_radius_m=right_radius;
+    have_pitch=false; last_pitch_rad=0;
     state=(StatusState){0}; have_sample=false; have_yaw=false; last_wrapped_yaw=0;
     OdometryApp_Init(&odometry);
     MotorApp_SetFeedbackCallback(on_motor_feedback);
+    return true;
 }
 void StatusStateApp_Update(uint32_t now) { MotorApp_Update(now); StatusStateApp_Poll(now); }
 void StatusStateApp_Poll(uint32_t now)
@@ -72,6 +90,7 @@ void StatusStateApp_Poll(uint32_t now)
         !SensorApp_GetSample()->valid) {
         state.valid=false;
         state.faults|=STATUS_STATE_ATTITUDE_INVALID;
+        have_pitch=false;
         if (odometry.initialized) { odometry.valid=false; odometry.continuous=false; }
     }
 }
