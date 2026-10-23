@@ -5,6 +5,9 @@
 #include "timebase.h"
 #include "motion_app.h"
 #include "status_state_app.h"
+#include "lqr_app.h"
+#include "trace_app.h"
+#include "debug_app.h"
 #include <math.h>
 #include <limits.h>
 
@@ -42,12 +45,82 @@ static void motor_status(void){
         milli(m->left.delta_displacement_m*1000),milli(m->right.delta_displacement_m*1000),
         m->left.delta_valid,m->right.delta_valid);
 }
-static void motor_stop(void) { MotorApp_Stop(Timebase_NowUs()); motor_left=motor_right=0; UART_Printf("MOTOR STOP\r\n"); }
+static void motor_stop(void) { DebugApp_Stop(Timebase_NowUs()); motor_left=motor_right=0; UART_Printf("MOTOR STOP\r\n"); }
 static void motor_keep(void) { MotorApp_KeepAlive(Timebase_NowUs()); }
 static void motor_duty(void){
+    if (LqrApp_IsActive()) { UART_Printf("MOTOR duty REJECTED: LQR active\r\n"); return; }
     bool ok=MotorApp_SetDuty(motor_left,motor_right,Timebase_NowUs());
     if (!ok && MotorApp_IsActive()) MotorApp_Stop(Timebase_NowUs());
     UART_Printf("MOTOR duty %s\r\n",ok ? "OK" : "REJECTED");
+}
+/* Read-only diagnostics: snapshot before printing; never starts the motors. */
+static void lqr_check(void) {
+    uint32_t now=Timebase_NowUs();
+    const StatusState *s=StatusStateApp_GetState();
+    const MotorAppStatus *m=MotorApp_GetStatus();
+    const MotionState *pose=MotionApp_GetState();
+    UART_Printf("LQR CHECK valid=%u faults=0x%lX state_age_us=%lu imu_age_us=%lu theta_mrad=%ld\r\n",
+        s->valid,(unsigned long)s->faults,(unsigned long)(now-s->timestamp_us),
+        (unsigned long)(now-s->attitude_timestamp_us),milli(s->theta_rad));
+    UART_Printf("LQR CHECK motor_mode=%u frame=%u wheels=%u,%u seq_match=%u pose_valid=%u pose_gap=%u\r\n",
+        (unsigned)m->mode,m->valid,m->left.feedback_valid,m->right.feedback_valid,
+        s->motor_sequence==m->sequence,pose->valid,pose->discontinuity);
+}
+static void lqr_soft_trial(void) {
+    bool ok=DebugApp_StartTrial(Timebase_NowUs(),true);
+    UART_Printf("LQR soft trial %s; pitch_rate_scale=0.70 auto-stop 2000ms\r\n",ok ? "OK" : "REJECTED");
+    if (!ok) lqr_check();
+}
+static void lqr_trial(void) {
+    bool ok=DebugApp_StartTrial(Timebase_NowUs(),false);
+    UART_Printf("LQR trial %s; auto-stop 2000ms\r\n",ok ? "OK" : "REJECTED");
+    if (!ok) lqr_check();
+}
+static void lqr_start(void) {
+    bool ok=LqrApp_Start(Timebase_NowUs());
+    UART_Printf("LQR start %s\r\n",ok ? "OK" : "REJECTED");
+    if (!ok) lqr_check();
+}
+static void trace_arm(void) {
+    UART_Printf("TRACE arm %s\r\n",TraceApp_Arm(DebugApp_GetTrace(DEBUG_TRACE_LQR)) ? "OK" : "REJECTED");
+}
+static void imu_trace_arm(void) {
+    UART_Printf("IMU TRACE arm %s\r\n",TraceApp_Arm(DebugApp_GetTrace(DEBUG_TRACE_IMU)) ? "OK" : "REJECTED");
+}
+static void imu_trace_freeze(void) {
+    TraceApp_Freeze(DebugApp_GetTrace(DEBUG_TRACE_IMU),Timebase_NowUs());
+}
+static void print_trace_status(DebugTraceSource source) {
+    Trace *t=DebugApp_GetTrace(source);
+    if (!t) return;
+    const volatile TraceStatus *s=TraceApp_GetStatus(t);
+    UART_Printf("TRACE mode=%u reason=%u source=%lu format=%lu session=%lu\r\n",
+        (unsigned)s->mode,(unsigned)s->freeze_reason,(unsigned long)s->source_id,
+        (unsigned long)s->format_id,(unsigned long)s->session);
+    UART_Printf("TRACE count=%lu capacity=%u next=%lu total=%lu duplicate=%lu\r\n",
+        (unsigned long)s->count,(unsigned)t->config.capacity,(unsigned long)s->write_index,
+        (unsigned long)s->total_written,(unsigned long)s->duplicate_frames);
+}
+static void trace_status(void) {
+    print_trace_status(DEBUG_TRACE_LQR);
+    print_trace_status(DEBUG_TRACE_IMU);
+}
+static void lqr_status(void) {
+    const LqrStatus *s=LqrApp_GetStatus();
+    LqrTuning tuning=LqrApp_GetTuning();
+    UART_Printf("LQR tuning pitch_rate_permille=%ld yaw_rate_permille=%ld\r\n",
+        milli(tuning.pitch_rate_scale),milli(tuning.yaw_rate_scale));
+    UART_Printf("LQR mode=%u fault=%lu updates=%lu dt=%lu age=%lu Ts=5000 K=zoh5-v1\r\n",
+        (unsigned)s->mode,(unsigned long)s->faults,(unsigned long)s->updates,
+        (unsigned long)s->dt_us,(unsigned long)s->data_age_us);
+    UART_Printf("LQR hold_milli=%ld,%ld,%ld E_milli=%ld,%ld,%ld,%ld,%ld,%ld\r\n",
+        milli(s->hold[0]),milli(s->hold[1]),milli(s->hold[2]),
+        milli(s->error[0]),milli(s->error[1]),milli(s->error[2]),
+        milli(s->error[3]),milli(s->error[4]),milli(s->error[5]));
+    UART_Printf("LQR req_mNm=%ld,%ld model_mNm=%ld,%ld duty_permille=%ld,%ld sat=%u\r\n",
+        milli(s->requested_nm[0]),milli(s->requested_nm[1]),
+        milli(s->estimated_nm[0]),milli(s->estimated_nm[1]),
+        milli(s->duty[0]),milli(s->duty[1]),s->saturated);
 }
 static void motion_status(void)
 {
@@ -98,6 +171,15 @@ bool TelemetryApp_Init(UART_HandleTypeDef *uart){
     debug = UART_Debug_Init(uart);
     if (!debug) return false;
     UART_CmdEntry_t commands[] = {
+        {.cmd="imutracearm", .type=TYPE_NONE, .func=imu_trace_arm},
+        {.cmd="imutracefreeze", .type=TYPE_NONE, .func=imu_trace_freeze},
+        {.cmd="tracearm", .type=TYPE_NONE, .func=trace_arm},
+        {.cmd="tracestatus", .type=TYPE_NONE, .func=trace_status},
+        {.cmd="lqrsoft", .type=TYPE_NONE, .func=lqr_soft_trial},
+        {.cmd="lqrtrial", .type=TYPE_NONE, .func=lqr_trial},
+        {.cmd="lqrcheck", .type=TYPE_NONE, .func=lqr_check},
+        {.cmd="lqrstart", .type=TYPE_NONE, .func=lqr_start},
+        {.cmd="lqrstatus", .type=TYPE_NONE, .func=lqr_status},
         {.cmd="ml", .type=TYPE_FLOAT, .var_ptr=&motor_left},
         {.cmd="mr", .type=TYPE_FLOAT, .var_ptr=&motor_right},
         {.cmd="mdrive", .type=TYPE_NONE, .func=motor_duty},

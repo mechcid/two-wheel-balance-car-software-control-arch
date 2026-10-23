@@ -1,0 +1,161 @@
+{
+  "valid_frames": 63,
+  "stop_event": {
+    "timestamp_us": 16170712,
+    "sequence": 1400,
+    "business_mode": 0,
+    "faults": 0,
+    "event": 1,
+    "valid": 0,
+    "mode": 0
+  },
+  "interval_us_minmax": [
+    4913,
+    5101
+  ],
+  "input_interval_us_minmax": [
+    4952,
+    5049
+  ],
+  "input_age_us_minmax": [
+    2401,
+    2535
+  ],
+  "consecutive_output_sequences": true,
+  "consecutive_input_sequences": true,
+  "torque_replay_max_error_nm": 1.9578571042178083e-08,
+  "duty_replay_max_error": 2.9483527896889683e-08,
+  "saturated_wheel_frames": [
+    13,
+    7
+  ],
+  "any_wheel_saturated_frames": 20,
+  "opposite_duty_frames": 40,
+  "torque_term_order": [
+    "position",
+    "yaw_angle",
+    "pitch",
+    "forward_speed",
+    "yaw_rate",
+    "pitch_rate"
+  ],
+  "torque_terms_rms_nm": [
+    [
+      0.025575480845847366,
+      0.0029403847114684877,
+      0.029502425106443346,
+      0.024307894418807888,
+      0.1011643433377105,
+      0.0531353648885918
+    ],
+    [
+      0.02557372063446138,
+      0.0029407185539789735,
+      0.02950395840060303,
+      0.024308449459143917,
+      0.10117648510814833,
+      0.05313883044804161
+    ]
+  ],
+  "common_torque_rms_nm": 0.06747554500212669,
+  "differential_torque_rms_nm": 0.10151439083203467,
+  "pitch_deg_minmax": [
+    -0.4588022160440038,
+    3.9474028166503805
+  ],
+  "yaw_deg_minmax": [
+    -1.4837082263018242,
+    0.8131700926265721
+  ],
+  "yaw_rate_deg_s_minmax": [
+    -67.41105744743943,
+    68.21427403345459
+  ],
+  "position_m_minmax": [
+    -0.06143747270107269,
+    -0.05442987382411957
+  ],
+  "yaw_positive_peak_times_s": [
+    0.069933,
+    0.174983
+  ],
+  "yaw_peak_period_s": [
+    0.10505
+  ],
+  "wheel_yaw_assumptions": {
+    "radius_m": 0.0325,
+    "track_width_m": 0.185,
+    "no_slip": true
+  },
+  "wheel_gyro_lag_correlations": [
+    {
+      "wheel_index_minus_gyro_index": -8,
+      "correlation": 0.5368428558129621
+    },
+    {
+      "wheel_index_minus_gyro_index": -7,
+      "correlation": 0.747489906145295
+    },
+    {
+      "wheel_index_minus_gyro_index": -6,
+      "correlation": 0.8934596416646526
+    },
+    {
+      "wheel_index_minus_gyro_index": -5,
+      "correlation": 0.9639123577839261
+    },
+    {
+      "wheel_index_minus_gyro_index": -4,
+      "correlation": 0.9552411215119109
+    },
+    {
+      "wheel_index_minus_gyro_index": -3,
+      "correlation": 0.8756701077895052
+    },
+    {
+      "wheel_index_minus_gyro_index": -2,
+      "correlation": 0.7284233123438405
+    },
+    {
+      "wheel_index_minus_gyro_index": -1,
+      "correlation": 0.5257701940522995
+    },
+    {
+      "wheel_index_minus_gyro_index": 0,
+      "correlation": 0.27821407315133523
+    },
+    {
+      "wheel_index_minus_gyro_index": 1,
+      "correlation": 0.00298265631312922
+    },
+    {
+      "wheel_index_minus_gyro_index": 2,
+      "correlation": -0.27665808116970053
+    },
+    {
+      "wheel_index_minus_gyro_index": 3,
+      "correlation": -0.5337008218249628
+    },
+    {
+      "wheel_index_minus_gyro_index": 4,
+      "correlation": -0.7449223012871193
+    },
+    {
+      "wheel_index_minus_gyro_index": 5,
+      "correlation": -0.8884749989986618
+    },
+    {
+      "wheel_index_minus_gyro_index": 6,
+      "correlation": -0.9581564744146348
+    },
+    {
+      "wheel_index_minus_gyro_index": 7,
+      "correlation": -0.9507048760056852
+    },
+    {
+      "wheel_index_minus_gyro_index": 8,
+      "correlation": -0.8703456123491675
+    }
+  ],
+  "limitations": "0.31 s window; lag correlation does not identify sensor latency or prove causality; model torque is not measured torque"
+}

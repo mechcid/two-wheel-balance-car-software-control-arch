@@ -237,6 +237,18 @@ int main()
     uint32_t before_callbacks=callbacks;
     now+=10000; MotorApp_Update(now);
     assert(callbacks==before_callbacks);
+    // Closed-loop application changes PWM immediately, but never consumes feedback.
+    uint32_t seq=MotorApp_GetStatus()->sequence;
+    uint32_t stamp=MotorApp_GetStatus()->timestamp_us;
+    int64_t counts=MotorApp_GetStatus()->left.total_counts;
+    assert(MotorApp_ApplyDuty(0.2f,-0.1f,now));
+    assert(enabled && pwm.CCR4==720 && pwm.CCR3==360);
+    assert(MotorApp_GetStatus()->sequence==seq && MotorApp_GetStatus()->timestamp_us==stamp);
+    assert(MotorApp_GetStatus()->left.total_counts==counts);
+    assert(!MotorApp_ApplyDuty(0.5f,0,now));
+    assert(!MotorApp_ApplyDuty(0.1f,0.1f,now+7501));
+    assert(!MotorApp_ApplyDuty(std::numeric_limits<float>::quiet_NaN(),0,now));
+    MotorApp_Stop(now);
     std::puts("PASS: delta validity, fresh/duplicate/zero frames, synchronous stop sampling, recovery;");
     std::puts("PASS: count-based displacement, radius validation, stop/restart continuity, gap flag;");
     std::puts("PASS: signed duty, RPM, encoder/time wrap, keepalive, gap timeout, dual-wheel fault/recovery");

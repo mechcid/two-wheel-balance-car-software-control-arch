@@ -33,11 +33,13 @@ typedef struct {
     bool valid;          /* 两轮增量同区间有效；不表示未被消费者处理。 */
 } MotorAppStatus;
 
-/* 所有时间参数来自 Timebase_NowUs；主循环约每 10 ms 更新一次。
+/* 所有时间参数来自 Timebase_NowUs；主循环每 5 ms 更新一次。
  * SetDuty 参数与状态 applied_duty 均为 -1..1 占空比，rpm 仅为实测反馈。 */
 bool MotorApp_Init(const MotorAppConfig *config, uint32_t now_us);
 void MotorApp_Update(uint32_t now_us);
 bool MotorApp_SetDuty(float left, float right, uint32_t now_us);
+/* Closed-loop output: apply immediately without resampling encoders. Main loop only. */
+bool MotorApp_ApplyDuty(float left, float right, uint32_t now_us);
 void MotorApp_Stop(uint32_t now_us);
 void MotorApp_KeepAlive(uint32_t now_us);
 bool MotorApp_IsActive(void);

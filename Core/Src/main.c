@@ -34,6 +34,9 @@
 #include "motor_board.h"
 #include "motion_app.h"
 #include "status_state_app.h"
+#include "lqr_app.h"
+#include "trace_app.h"
+#include "debug_app.h"
 #include "timebase.h"
 
 /* USER CODE END Includes */
@@ -67,11 +70,9 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-static void state_task(void *context)
-{
-  (void)context;
-  StatusStateApp_Update(Timebase_NowUs());
-}
+static LqrTrace lqr_trace;
+static ImuTrace imu_trace;
+static uint32_t last_state_deadline_us;
 static bool sample_available(void)
 {
   const ImuSample *sample = SensorApp_GetSample();
@@ -105,9 +106,9 @@ static void uart_task(void *context) {
 
 static void oled_task(void *context){
   (void)context;
-  /* 100 kHz 下单块约 2.07 ms，额外留出软件开销余量。 */
+  /* 8 字节分块，允许在姿态和整车状态计算后的剩余时间刷新。 */
   //很大胆的设计，将i2c总线被mpu占用后的剩余量全都用来推oled，我并不是很喜欢这样做，后续可以看看怎么优化
-  if (MotionApp_TimeUntilSampleUs() >= 2500U) DisplayApp_Poll();
+  if (MotionApp_TimeUntilSampleUs() >= OLED_POLL_BUDGET_US) DisplayApp_Poll();
 }
 static void sensor_retry_task(void *context)
 {
@@ -121,7 +122,6 @@ static void oled_retry_task(void *context)
 /* 应用任务的周期统一在此配置；周期为 0 表示每轮主循环都执行。
  * 故障恢复目前会阻塞等待 MPU 复位和稳定，因此不保证硬实时性。 */
 static SchedulerTask tasks[] = {
-  {.function=state_task,        .period_ms=10,   .enabled=true},
   {.function=uart_task,         .period_ms=0,    .enabled=true},
   {.function=display_task,      .period_ms=200,  .enabled=true},
   /* 周期输出共用 9600/8N1，500 ms 周期为命令回执留出带宽。 */
@@ -166,6 +166,8 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
+  
+  //这里隐含着执行了一次时间基准的初始化
   if (!Timebase_Init()) Error_Handler();
 
   /* USER CODE END SysInit */
@@ -189,6 +191,13 @@ int main(void)
   if (!MotionApp_Init(&motion_config)) Error_Handler();
   if (motor_config && !StatusStateApp_Init(motor_config->left.radius_m,
                                            motor_config->right.radius_m)) Error_Handler();
+  LqrConfig lqr_config=LqrApp_DefaultConfig();
+  LqrTuning lqr_tuning=LqrApp_DefaultTuning();
+  if (!LqrApp_Init(&lqr_config,&lqr_tuning)) Error_Handler();
+  /* 两个记录器拥有独立的类型化数组；初始化不启动记录或电机。 */
+  if (!LqrTrace_Init(&lqr_trace) || !ImuTrace_Init(&imu_trace)) Error_Handler();
+  if (!DebugApp_Init(&lqr_trace,&imu_trace)) Error_Handler();
+  last_state_deadline_us=Timebase_NowUs();
   Scheduler_Init(tasks, TASK_COUNT, HAL_GetTick());
 
   /* USER CODE END 2 */
@@ -201,8 +210,18 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     MotionApp_Poll(); /* 优先处理 200 Hz 采集截止时间；阻塞式 I2C 不在中断内执行。 */
-    StatusStateApp_Poll(Timebase_NowUs());
+    uint32_t now=Timebase_NowUs();
+    StatusStateApp_Poll(now);
+    LqrApp_Poll(now);
+    uint32_t periods=(uint32_t)(now-last_state_deadline_us)/LQR_PERIOD_US;
+    if (periods) {
+      last_state_deadline_us+=periods*LQR_PERIOD_US;
+      StatusStateApp_Update(now);
+      LqrApp_Update(Timebase_NowUs());
+    }
+    DebugApp_Poll(Timebase_NowUs());
     Scheduler_Run(tasks, TASK_COUNT, HAL_GetTick());
+    DebugApp_Poll(Timebase_NowUs());
   }
   /* USER CODE END 3 */
 }

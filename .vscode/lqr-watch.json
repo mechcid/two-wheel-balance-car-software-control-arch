@@ -1,0 +1,6 @@
+{
+    "expressions": [
+        "'main.c'::lqr_trace.recorder.status",
+        "'main.c'::lqr_trace.frames"
+    ]
+}

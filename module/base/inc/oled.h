@@ -11,6 +11,8 @@ extern "C" {
 /* SSD1306 128x64, 0x3C/0x3D. Coordinates: lines 1..4, columns 1..16.
  * Show functions update RAM; call OLED_Poll regularly to send dirty chunks. */
 HAL_StatusTypeDef OLED_Init(I2C_HandleTypeDef *bus);
+/* 100 kHz: cursor + 8 data bytes take about 1.35 ms; include software margin. */
+#define OLED_POLL_BUDGET_US 1700U
 void OLED_Poll(void);
 uint8_t OLED_IsReady(void);
 uint8_t OLED_Address(void);

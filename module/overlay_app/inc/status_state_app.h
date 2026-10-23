@@ -22,7 +22,7 @@ enum {
     STATUS_STATE_STALE=1u<<4
 };
 /* Init 在 MotionApp/MotorApp 初始化后调用，独占电机反馈回调。
- * Update 是约 100 Hz 任务，负责触发双轮采样；不可再单独调 MotorApp_Update。
+ * Update 是200 Hz 任务，负责触发双轮采样；不可再单独调 MotorApp_Update。
  * Poll 每轮主循环执行，失效旧状态，不为旧数据制造新序号。
  * 停机补采样也会发布，故 sequence 不等同于严格周期计数。 */
 /* 轮半径直接取现有 MotorConfig；仅校验并复制，不修改电机配置。 */

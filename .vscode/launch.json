@@ -21,7 +21,10 @@
             "liveWatch": {
                 "enabled": true,
                 "samplesPerSecond": 4
-            }
+            },
+            "postLaunchCommands": [
+                "source ${workspaceFolder}/tools/trace_gdb.py"
+            ]
         }
     ]
 }

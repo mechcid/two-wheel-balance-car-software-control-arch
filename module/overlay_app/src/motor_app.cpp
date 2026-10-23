@@ -122,6 +122,22 @@ bool MotorApp_SetDuty(float left, float right, uint32_t now){
     return true;
 }
 
+// Closed-loop path: consume the already published feedback, then write this cycle's PWM.
+bool MotorApp_ApplyDuty(float left, float right, uint32_t now){
+    if (!request_valid(left,right) || !status.valid ||
+        !status.left.feedback_valid || !status.right.feedback_valid ||
+        (uint32_t)(now-status.timestamp_us)>7500U) return false;
+    bool left_ok=left_motor->setDuty(left);
+    bool right_ok=right_motor->setDuty(right);
+    if (!left_ok || !right_ok) { stop_and_sample(now,true); return false; }
+    command={left,right}; status.mode=MOTOR_DUTY; last_command=now;
+    config.set_driver_enabled(true);
+    // Do not change feedback sequence, interval or acquisition timestamp.
+    status.left.applied_duty=left_motor->state().applied_duty;
+    status.right.applied_duty=right_motor->state().applied_duty;
+    return true;
+}
+
 //更新函数，传入一个时间基准就能自动更新计算出速度
 //速度计算是要时刻更新的，但是占空比设置相对于速度计算独立，写个语句就能设置
 void MotorApp_Update(uint32_t now){

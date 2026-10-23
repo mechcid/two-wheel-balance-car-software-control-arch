@@ -56,6 +56,10 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     module/overlay_app/src/motion_estimator.c
     module/overlay_app/src/motion_app.c
     module/overlay_app/src/odometry_app.c
+    module/overlay_app/src/debug_app.c
+    module/overlay_app/src/trace_sources.c
+    module/overlay_app/src/trace_app.c
+    module/overlay_app/src/lqr_app.c
     module/overlay_app/src/status_state_app.c
     module/base/src/mpu6050.c
     Core/Src/motor_board.c

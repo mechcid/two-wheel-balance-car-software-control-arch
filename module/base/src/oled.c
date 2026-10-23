@@ -2,9 +2,11 @@
 #include "OLED_Font.h"
 #include <string.h>
 
-/* SSD1306 128×64 屏幕，采用页寻址；每次轮询最多发送一页中的 16 列数据。 */
+/* SSD1306 128×64 屏幕，采用页寻址；每次轮询最多发送一页中的 8 列数据。 */
 static I2C_HandleTypeDef *oled_bus;
-static uint8_t frame[1024], dirty[64];
+#define OLED_CHUNK_BYTES 8U
+#define OLED_CHUNK_COUNT (1024U / OLED_CHUNK_BYTES)
+static uint8_t frame[1024], dirty[OLED_CHUNK_COUNT];
 static uint8_t ready, address, next_chunk;
 static uint32_t error, transfers;
 
@@ -61,15 +63,15 @@ void OLED_Clear(void)
 void OLED_Poll(void)
 {
     if (!ready) return;
-    for (unsigned n = 0; n < 64; ++n) {
+    for (unsigned n = 0; n < OLED_CHUNK_COUNT; ++n) {
         uint8_t chunk = next_chunk;
-        next_chunk = (next_chunk + 1) % 64;
+        next_chunk = (next_chunk + 1) % OLED_CHUNK_COUNT;
         if (!dirty[chunk]) continue;
-        uint8_t page = chunk / 8, column = (chunk % 8) * 16;
+        uint8_t page = chunk / 16, column = (chunk % 16) * OLED_CHUNK_BYTES;
         uint8_t cursor[] = {0x00, (uint8_t)(0xB0 | page),
             (uint8_t)(0x10 | (column >> 4)), (uint8_t)(column & 0x0F)};
-        uint8_t data[17] = {0x40};
-        memcpy(data + 1, frame + chunk * 16, 16);
+        uint8_t data[1 + OLED_CHUNK_BYTES] = {0x40};
+        memcpy(data + 1, frame + chunk * OLED_CHUNK_BYTES, OLED_CHUNK_BYTES);
         if (send_bytes(cursor, sizeof(cursor)) != HAL_OK) return;
         if (send_bytes(data, sizeof(data)) != HAL_OK) return;
         dirty[chunk] = 0;
@@ -89,7 +91,7 @@ void OLED_ShowChar(uint8_t line, uint8_t column, char character)
         unsigned offset = ((line - 1) * 2 + half) * 128 + (column - 1) * 8;
         if (memcmp(frame + offset, OLED_F8x16[index] + half * 8, 8)) {
             memcpy(frame + offset, OLED_F8x16[index] + half * 8, 8);
-            dirty[offset / 16] = 1;
+            dirty[offset / OLED_CHUNK_BYTES] = 1;
         }
     }
 }

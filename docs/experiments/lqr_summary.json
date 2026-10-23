@@ -1,0 +1,38 @@
+[
+  {
+    "trial": 1,
+    "recorded_active_frames": 81,
+    "sampled_dt_us": [
+      4979,
+      5235
+    ],
+    "max_sampled_imu_age_us": 2474,
+    "pitch_deg": [
+      -3.35542007600162,
+      2.3866202811548995
+    ],
+    "peak_abs_duty": [
+      0.4000000059604645,
+      0.4000000059604645
+    ],
+    "sampled_saturated_frames": 9
+  },
+  {
+    "trial": 2,
+    "recorded_active_frames": 81,
+    "sampled_dt_us": [
+      4989,
+      5046
+    ],
+    "max_sampled_imu_age_us": 2403,
+    "pitch_deg": [
+      -0.33207499290529296,
+      0.5614933098023521
+    ],
+    "peak_abs_duty": [
+      0.018790988251566887,
+      0.01916499249637127
+    ],
+    "sampled_saturated_frames": 0
+  }
+]
