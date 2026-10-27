@@ -53,12 +53,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     module/base/src/timebase.c
     module/base/src/TIM_IT.c
-    module/overlay_app/src/motion_estimator.c
-    module/overlay_app/src/motion_app.c
     module/overlay_app/src/odometry_app.c
-    module/overlay_app/src/debug_app.c
-    module/overlay_app/src/trace_sources.c
-    module/overlay_app/src/trace_app.c
     module/overlay_app/src/lqr_app.c
     module/overlay_app/src/status_state_app.c
     module/base/src/mpu6050.c
@@ -68,9 +63,16 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     module/base/src/scheduler.c
     module/overlay_app/src/display_app.c
     module/overlay_app/src/telemetry_app.c
-    module/overlay_app/src/sensor_app.c
     module/base/src/uart_debug.c
     module/base/src/oled.c
+
+    module/pose_estimate/src/sensor_app.c
+    module/pose_estimate/src/motion_estimator.c
+    module/pose_estimate/src/motion_app.c
+
+    module/debug/src/debug_app.c
+    module/debug/src/trace_sources.c
+    module/debug/src/trace_app.c
 )
 
 # Cortex-M3 没有 FPU，解算热路径在 Debug 下也启用优化，保留调试符号。
@@ -80,6 +82,8 @@ set_source_files_properties(module/overlay_app/src/motion_estimator.c PROPERTIES
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     module/base/inc
     module/overlay_app/inc
+    module/pose_estimate/inc
+    module/debug/inc
 )
 
 # Add project symbols (macros)
