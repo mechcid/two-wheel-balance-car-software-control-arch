@@ -12,6 +12,12 @@ uint32_t test_mask;
 static uint64_t total_cycles;
 static HAL_StatusTypeDef ready_result=HAL_OK, read_result=HAL_OK;
 static unsigned reads;
+static unsigned clock_calls;
+static uint32_t sensor_clock(void)
+{
+    ++clock_calls;
+    return Timebase_NowUs();
+}
 static void cycles(uint32_t n)
 {
     total_cycles+=n;
@@ -54,12 +60,17 @@ int main(void)
     uint32_t now=Timebase_NowUs();
     assert(Timebase_Init() && Timebase_NowUs()==now); /* 重复初始化不重置。 */
     I2C_HandleTypeDef bus={0};
-    assert(SensorApp_Init(&bus,0)==HAL_OK);
+    assert(SensorApp_Update()==HAL_ERROR);
+    assert(SensorApp_Init(&bus,0,0)==HAL_ERROR);
+    assert(SensorApp_Init(&bus,0,sensor_clock)==HAL_OK);
     assert(!SensorApp_GetSample()->valid);
     assert(SensorApp_Update()==HAL_OK);
+    assert(clock_calls==2); /* 超时检查和读取开始均通过注入的时钟取时。 */
     ImuSample previous=*SensorApp_GetSample();
     assert(previous.sequence==1 && previous.timestamp_us==now);
     assert(previous.data.accel[2]==1 && previous.data.gyro[0]==1);
+    assert(SensorApp_Init(&bus,0,0)==HAL_ERROR);
+    assert(SensorApp_GetSample()->valid && SensorApp_GetSample()->sequence==previous.sequence);
     ready_result=HAL_BUSY;
     assert(SensorApp_Update()==HAL_BUSY);
     assert(SensorApp_GetSample()->sequence==1 && SensorApp_GetSample()->valid);
@@ -67,7 +78,7 @@ int main(void)
     assert(SensorApp_Update()==HAL_BUSY);
     assert(!SensorApp_GetSample()->valid);
     assert(SensorApp_GetSample()->timestamp_us==previous.timestamp_us);
-    assert(SensorApp_GetStatus()->failures==0);
+    assert(SensorApp_GetStatus()->fail_read_count==0);
     ready_result=HAL_OK;
     read_result=HAL_ERROR;
     assert(SensorApp_Update()==HAL_ERROR);

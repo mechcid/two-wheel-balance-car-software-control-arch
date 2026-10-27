@@ -182,7 +182,7 @@ int main(void)
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   if (!TelemetryApp_Init(&huart2)) Error_Handler();
-  SensorApp_Init(&hi2c2, &calibration); // 初始化传感器应用，传入 I2C 总线和校准参数
+  SensorApp_Init(&hi2c2, &calibration, Timebase_NowUs); // 初始化传感器应用，绑定总线、校准参数和微秒时钟
   DisplayApp_Init(&hi2c2);
   const MotorAppConfig *motor_config=MotorBoard_Init();
   MotorApp_Init(motor_config, Timebase_NowUs());

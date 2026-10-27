@@ -1,16 +1,19 @@
 #include "sensor_app.h"
 #include "mpu6050.h"
-#include "timebase.h"
 #include <math.h>
 
 //这个模块用于储存MPU6050的原始数据和矫正后的数据，并通过函数暴露给外界使用
 
-static MPU6050 device;
 static I2C_HandleTypeDef *sensor_bus;
+//传一个返回32位无符号整数的函数的地址，用于作为后续的时间基准，单位为us
+static SensorClockFn sensor_clock_now_us;
+
+static SensorCalibration calibration;   //矫正基准
+static MPU6050 device;
 static MPU6050_Sample raw_sample;   //私有原始样本，不向外部使用者暴露
 static ImuSample corrected_sample;  //矫正后的样本，向外部使用者暴露
-static SensorStatus status;
-static SensorCalibration calibration;   //矫正基准
+static SensorStatus status; //维护模块工作状态
+
 static float actual_rate_hz;
 
 //定义放缩倍数和零点偏移，主要在检查输入的值是否合法，合法了才会更新校准参数。起校准作用
@@ -31,15 +34,14 @@ bool SensorApp_SetCalibration(const SensorCalibration *value){
     calibration = *value;
     return true;
 }
+//用于检测当前模块的工作状态
 static void capture_status(HAL_StatusTypeDef result){
     status.ready = device.ready != 0;
-    status.address = device.address;
-    status.who_am_i = device.who_am_i;
-    status.last_result = result;
+    status.reason = result;
     status.bus_error = device.error;
 }
-HAL_StatusTypeDef SensorApp_Reconnect(void)
-{
+//用于初始化和重新初始化MPU6050设备，如果失败就将ready置为0，valid置为false，actual_rate_hz置为0
+HAL_StatusTypeDef SensorApp_Reconnect(void){
     corrected_sample.valid=false;
     actual_rate_hz=0;
     HAL_StatusTypeDef result = MPU6050_Init(&device, sensor_bus);
@@ -48,11 +50,12 @@ HAL_StatusTypeDef SensorApp_Reconnect(void)
     capture_status(result);
     return result;
 }
-HAL_StatusTypeDef SensorApp_Init(I2C_HandleTypeDef *bus, const SensorCalibration *initial_calibration)
-{
+HAL_StatusTypeDef SensorApp_Init(I2C_HandleTypeDef *bus, const SensorCalibration *initial_calibration,
+                                  SensorClockFn clock_now_us){
     /* 先检查并复制配置，非法参数不清空已有样本，也不启动硬件初始化。 */
-    if (!bus || !SensorApp_SetCalibration(initial_calibration)) return HAL_ERROR;
+    if (!bus || !clock_now_us || !SensorApp_SetCalibration(initial_calibration)) return HAL_ERROR;
     sensor_bus = bus;
+    sensor_clock_now_us = clock_now_us;
     device = (MPU6050){0};
     raw_sample = (MPU6050_Sample){0};
     corrected_sample = (ImuSample){0};
@@ -74,20 +77,21 @@ static ImuSample correct(const MPU6050_Sample *raw, uint32_t timestamp_us){
         .data={.accel={a[0],a[1],a[2]}, .gyro={g[0],g[1],g[2]}},
         .timestamp_us=timestamp_us, .sequence=corrected_sample.sequence+1U, .valid=true};
 }
-HAL_StatusTypeDef SensorApp_Update(void)
-{
-    uint32_t now=Timebase_NowUs();
+
+HAL_StatusTypeDef SensorApp_Update(void){
+    if (!sensor_clock_now_us) return HAL_ERROR;
+    uint32_t now=sensor_clock_now_us();
     if ((uint32_t)(now-corrected_sample.timestamp_us)>=IMU_TIMEOUT_US)
         corrected_sample.valid=false;
     if (!device.ready) return HAL_ERROR;
     MPU6050_Sample next_raw;
     HAL_StatusTypeDef result = MPU6050_DataReady(&device);
     if (result==HAL_BUSY) return HAL_BUSY;
-    uint32_t timestamp_us=Timebase_NowUs();
+    uint32_t timestamp_us=sensor_clock_now_us();
     if (result==HAL_OK) result=MPU6050_Read(&device, &next_raw);
     if (result != HAL_OK) {
         corrected_sample.valid=false;
-        status.failures++;
+        status.fail_read_count++;
         device.ready = 0;
         capture_status(result);
         return result;
@@ -95,13 +99,15 @@ HAL_StatusTypeDef SensorApp_Update(void)
     ImuSample next_corrected = correct(&next_raw, timestamp_us);
     raw_sample = next_raw;
     corrected_sample = next_corrected;
-    status.reads++;
+    status.succ_read_count++;
     capture_status(HAL_OK);
     return HAL_OK;
 }
 
-//定义两个返回只读指针的函数，用于获取状态信息
+//定义两个返回只读指针的函数，供外界调用
+//返回修正后的样本和传感器状态的只读指针，外部模块可以通过这些指针访问数据
 const ImuSample *SensorApp_GetSample(void) { return &corrected_sample; }
+//返回传感器状态的只读指针，外部模块可以通过这个指针访问传感器的状态信息
 const SensorStatus *SensorApp_GetStatus(void) { return &status; }
-
+//返回MPU模块的实际输出速率
 float SensorApp_GetOutputRate(void) { return actual_rate_hz; }

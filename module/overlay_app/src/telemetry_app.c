@@ -154,11 +154,11 @@ static void status(void)
 {
     const SensorStatus *state = SensorApp_GetStatus();
     const ImuSample *sample = SensorApp_GetSample();
-    UART_Printf("STATUS ready=%u addr=0x%02X who=0x%02X ok=%lu fail=%lu\r\n",
-        state->ready, state->address, state->who_am_i,
-        (unsigned long)state->reads, (unsigned long)state->failures);
-    UART_Printf("SAMPLE valid=%u us=%lu seq=%lu hal=%u bus=0x%lX\r\n", sample->valid,
-        (unsigned long)sample->timestamp_us, (unsigned long)sample->sequence, state->last_result, (unsigned long)state->bus_error);
+    UART_Printf("STATUS ready=%u ok=%lu fail=%lu\r\n",
+        state->ready,
+        (unsigned long)state->succ_read_count, (unsigned long)state->fail_read_count);
+    UART_Printf("SAMPLE valid=%u us=%lu seq=%lu reason=%u bus=0x%lX\r\n", sample->valid,
+        (unsigned long)sample->timestamp_us, (unsigned long)sample->sequence, state->reason, (unsigned long)state->bus_error);
     UART_Printf("OLED ready=%u addr=0x%02X err=0x%lX chunks=%lu\r\n", OLED_IsReady(),
         OLED_Address(), (unsigned long)OLED_Error(), (unsigned long)OLED_Transfers());
     UART_Printf("UART rx_drop=%lu tx_drop=%lu err=%lu tx_err=%lu\r\n",

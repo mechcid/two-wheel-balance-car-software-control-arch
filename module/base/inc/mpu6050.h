@@ -2,7 +2,10 @@
 #define MPU6050_H
 #include "main.h"
 
-//储存一个MPU6050传感器的状态和配置，包括I2C总线、设备地址、WHO_AM_I寄存器值、初始化状态和错误码。
+//储存一个MPU6050传感器的状态和配置，
+//意义依次是，I2C总线、设备在i2c上的地址、WHO_AM_I寄存器值、指示是否初始化好的状态和错误码。
+//WHO_AM_I这个寄存器的意义主要是用来校验，存的是这个设备挂在i2c总线上的地址，比如设备地址可能是0x68，
+//WHO_AM_I寄存器的值也应该是0x68，如果发现其返回的地址与访问的地址不一样，就说明出问题了
 typedef struct {
     I2C_HandleTypeDef *bus;
     uint8_t address, who_am_i, ready;

@@ -4,9 +4,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+//定义频率，周期和超时的宏，分别为200Hz，5000us和20000us，供后续引入的文件使用
 #define IMU_OUTPUT_HZ 200U
 #define IMU_PERIOD_US (1000000U / IMU_OUTPUT_HZ)
 #define IMU_TIMEOUT_US 20000U
+
+/* 微秒时钟：持续递增，允许 uint32_t 自然回绕；使用前由调用者初始化。
+ * 消费者判断样本年龄时必须使用同一时间基准。 */
+typedef uint32_t (*SensorClockFn)(void);
 
 typedef struct {
     float accel[3]; /* 校准后 g，X/Y/Z。 */
@@ -26,22 +31,27 @@ typedef struct {
 } SensorCalibration;
 
 typedef struct {
-    bool ready;
-    uint8_t address, who_am_i;
-    uint32_t reads, failures;
-    HAL_StatusTypeDef last_result;
-    uint32_t bus_error;
+    bool ready;                 /* 模块是否就绪，可读取数据；不表示样本新鲜。 */
+    uint32_t succ_read_count;    /* 成功读取并发布样本的次数。 */
+    uint32_t fail_read_count;    /* 数据就绪检查或读取发生错误的次数。 */
+    /* 最近一次记录的初始化、重连或采集结果，供后续诊断。
+     * 使用 HAL_OK/HAL_ERROR/HAL_BUSY/HAL_TIMEOUT；无新数据及未就绪的
+     * 提前返回不更新快照。成功操作会覆盖此前记录，不是故障历史。 */
+    HAL_StatusTypeDef reason;
+    uint32_t bus_error;          /* 记录 reason 时同步保存的底层错误码，防止后续变化影响诊断。 */
 } SensorStatus;
 
 /* 单实例，仅在主循环中访问；不负责调度、日志或显示。
  * 初始化清空样本和统计，并复制传入的校准参数；传 NULL 使用零偏 0、比例 1。
- * 总线为空或校准参数非法时返回 HAL_ERROR，不改变已有状态、不访问硬件。
+ * 初始化时绑定时钟函数，重连保留绑定。
+ * 总线或时钟函数为空、校准参数非法时返回 HAL_ERROR，不改变已有状态、不访问硬件。
  * 重连保留已有数值、序号、校准参数和统计，但清除 valid。两种初始化路径目前都会在 MPU
  * 驱动中阻塞等待；由调用者决定重试时机。 */
-HAL_StatusTypeDef SensorApp_Init(I2C_HandleTypeDef *bus, const SensorCalibration *initial_calibration);
+HAL_StatusTypeDef SensorApp_Init(I2C_HandleTypeDef *bus, const SensorCalibration *initial_calibration,
+                                  SensorClockFn clock_now_us);
 HAL_StatusTypeDef SensorApp_Reconnect(void);
 /* 检查数据就绪；无新样本返回 HAL_BUSY，不增加序号及失败计数。
- * 旧数据超时则清除 valid；Timebase 必须先初始化。 */
+ * 旧数据超时则清除 valid；未绑定时钟时返回 HAL_ERROR。 */
 HAL_StatusTypeDef SensorApp_Update(void);
 float SensorApp_GetOutputRate(void);
 const ImuSample *SensorApp_GetSample(void);

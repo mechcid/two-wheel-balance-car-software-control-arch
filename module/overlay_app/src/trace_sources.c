@@ -31,8 +31,8 @@ static bool imu_snapshot(void *context, TraceBusinessStatus *b, void *payload, u
     const ImuSample *s=SensorApp_GetSample();
     const SensorStatus *health=SensorApp_GetStatus();
     *b=(TraceBusinessStatus){.mode=health->ready ? TRACE_BUSINESS_RUNNING :
-        health->failures ? TRACE_BUSINESS_FAULT : TRACE_BUSINESS_STOPPED,
-        .has_sample=health->reads>0,.valid=s->valid,.sequence=s->sequence,
+        health->fail_read_count ? TRACE_BUSINESS_FAULT : TRACE_BUSINESS_STOPPED,
+        .has_sample=health->succ_read_count>0,.valid=s->valid,.sequence=s->sequence,
         .timestamp_us=s->timestamp_us,.faults=health->ready ? 0 : health->bus_error};
     /* 采样时间原样保留：它是软件读取开始时间，不是芯片内部采样时刻。 */
     ImuTracePayload p; memcpy(p.accel,s->data.accel,sizeof p.accel);
