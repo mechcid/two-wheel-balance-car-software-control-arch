@@ -7,6 +7,7 @@
 static I2C_HandleTypeDef *sensor_bus;
 //传一个返回32位无符号整数的函数的地址，用于作为后续的时间基准，单位为us
 static SensorClockFn sensor_clock_now_us;
+static uint32_t last_sample_deadline_us;
 
 static SensorCalibration calibration;   //矫正基准
 static MPU6050 device;
@@ -48,6 +49,8 @@ HAL_StatusTypeDef SensorApp_Reconnect(void){
     if (result==HAL_OK) result=MPU6050_SetOutputRate(&device,IMU_OUTPUT_HZ,&actual_rate_hz);
     if (result!=HAL_OK) device.ready=0;
     capture_status(result);
+    /* 重连可能阻塞；以完成时刻重新建立采集周期。 */
+    if (sensor_clock_now_us) last_sample_deadline_us=sensor_clock_now_us();
     return result;
 }
 HAL_StatusTypeDef SensorApp_Init(I2C_HandleTypeDef *bus, const SensorCalibration *initial_calibration,
@@ -78,11 +81,7 @@ static ImuSample correct(const MPU6050_Sample *raw, uint32_t timestamp_us){
         .timestamp_us=timestamp_us, .sequence=corrected_sample.sequence+1U, .valid=true};
 }
 
-HAL_StatusTypeDef SensorApp_Update(void){
-    if (!sensor_clock_now_us) return HAL_ERROR;
-    uint32_t now=sensor_clock_now_us();
-    if ((uint32_t)(now-corrected_sample.timestamp_us)>=IMU_TIMEOUT_US)
-        corrected_sample.valid=false;
+static HAL_StatusTypeDef SensorApp_Update(void){
     if (!device.ready) return HAL_ERROR;
     MPU6050_Sample next_raw;
     HAL_StatusTypeDef result = MPU6050_DataReady(&device);
@@ -102,6 +101,26 @@ HAL_StatusTypeDef SensorApp_Update(void){
     status.succ_read_count++;
     capture_status(HAL_OK);
     return HAL_OK;
+}
+
+void SensorApp_Poll(void)
+{
+    if (!sensor_clock_now_us) return;
+    uint32_t now=sensor_clock_now_us();
+    if ((uint32_t)(now-corrected_sample.timestamp_us)>=IMU_TIMEOUT_US)
+        corrected_sample.valid=false;
+    uint32_t periods=(uint32_t)(now-last_sample_deadline_us)/IMU_PERIOD_US;
+    if (!periods) return;
+    /* 按计划推进，错过多个周期只尝试一次，不补读历史帧。 */
+    last_sample_deadline_us+=periods*IMU_PERIOD_US;
+    (void)SensorApp_Update();
+}
+
+uint32_t SensorApp_TimeUntilSampleUs(void)
+{
+    if (!sensor_clock_now_us) return 0;
+    uint32_t elapsed=(uint32_t)(sensor_clock_now_us()-last_sample_deadline_us);
+    return elapsed<IMU_PERIOD_US ? IMU_PERIOD_US-elapsed : 0;
 }
 
 //定义两个返回只读指针的函数，供外界调用

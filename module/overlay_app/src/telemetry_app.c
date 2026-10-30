@@ -58,7 +58,7 @@ static void lqr_check(void) {
     uint32_t now=Timebase_NowUs();
     const StatusState *s=StatusStateApp_GetState();
     const MotorAppStatus *m=MotorApp_GetStatus();
-    const MotionState *pose=MotionApp_GetState();
+    const MotionSample *pose=MotionApp_GetSample();
     UART_Printf("LQR CHECK valid=%u faults=0x%lX state_age_us=%lu imu_age_us=%lu theta_mrad=%ld\r\n",
         s->valid,(unsigned long)s->faults,(unsigned long)(now-s->timestamp_us),
         (unsigned long)(now-s->attitude_timestamp_us),milli(s->theta_rad));
@@ -125,15 +125,15 @@ static void lqr_status(void) {
 static void motion_status(void)
 {
     const MotionAppStatus *a=MotionApp_GetStatus();
-    const MotionState *s=MotionApp_GetState();
-    float angles[3]; MotionApp_GetEuler(angles);
-    UART_Printf("MPU hz_m=%ld dt_us=%ld ok=%lu missed=%lu nodata=%lu fail=%lu\r\n",
-        milli(a->sensor_hz),
-        milli(a->last_dt_s*1000),(unsigned long)a->updates,
-        (unsigned long)a->missed_periods,(unsigned long)a->no_data,(unsigned long)a->failures);
-    UART_Printf("POSE valid=%u trusted=%u gap=%u rpy_mdeg=%ld,%ld,%ld\r\n",
-        s->valid,s->accel_trusted,s->discontinuity,
-        milli(angles[0]),milli(angles[1]),milli(angles[2]));
+    const MotionSample *s=MotionApp_GetSample();
+    const EulerAnglesDeg angles=s->data;
+    UART_Printf("MPU hz_m=%ld dt_us=%ld ok=%lu fail=%lu\r\n",
+        milli(SensorApp_GetOutputRate()),
+        milli(a->last_dt_s*1000),(unsigned long)a->succ_update_count,
+        (unsigned long)a->fail_update_count);
+    UART_Printf("POSE state=%u valid=%u trusted=%u gap=%u rpy_mdeg=%ld,%ld,%ld\r\n",
+        (unsigned)a->state,s->valid,a->accel_trusted,s->discontinuity,
+        milli(angles.roll),milli(angles.pitch),milli(angles.yaw));
 
 }
 /* 查询状态向量，整数输出统一放大 1000 倍；不新增高频串口流。 */
@@ -221,15 +221,14 @@ void TelemetryApp_ReportImu(const ImuSample *sample, bool available){
 //打印姿态数据
 void TelemetryApp_ReportAttitude(bool available){
     if (!initialized || !stream) return;
-    const MotionState *state=MotionApp_GetState();
-    uint32_t timestamp=MotionApp_GetStatus()->timestamp_us;
+    const MotionSample *state=MotionApp_GetSample();
+    uint32_t timestamp=state->timestamp_us;
     bool valid=available && state->valid &&
         (uint32_t)(Timebase_NowUs()-timestamp)<IMU_TIMEOUT_US;
-    float angles[3];
-    MotionApp_GetEuler(angles);
+    const EulerAnglesDeg angles=state->data;
     /* 无效时仍发 valid=0，角度仅为保留值，不冒充新鲜结果。 */
     UART_Printf("POSE_US,%lu,%u,%ld,%ld,%ld\r\n",
-        (unsigned long)timestamp,valid,milli(angles[0]),milli(angles[1]),milli(angles[2]));
+        (unsigned long)timestamp,valid,milli(angles.roll),milli(angles.pitch),milli(angles.yaw));
 }
 
 //打印两轮速度和位移数据

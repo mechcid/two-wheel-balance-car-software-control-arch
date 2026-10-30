@@ -2,6 +2,9 @@
 #include <math.h>
 #include <string.h>
 
+/*本文件只做相关的运动学公式，加速度与陀螺仪融合、滤波、输入检查，以及失效后的姿态重建等算法的集成
+ *内部并不包含任何的调度逻辑，完全脱离当前项目也能直接拿来用*/
+
 static float norm3(const float v[3])
 {
     return sqrtf(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
@@ -70,9 +73,9 @@ bool MotionEstimator_Update(MotionEstimator *e, const float accel[3], const floa
         float roll=atan2f(a[1],a[2]);
         float pitch=atan2f(-a[0],sqrtf(a[1]*a[1]+a[2]*a[2]));
         /* 首次启动航向为零；恢复后沿用上一帧航向。 */
-        float old_angles[3];
-        MotionEstimator_GetEuler(e,old_angles);
-        float yaw=old_angles[2]*0.01745329252f;
+        EulerAnglesDeg old_angles;
+        MotionEstimator_GetEuler(e,&old_angles);
+        float yaw=old_angles.yaw*0.01745329252f;
         float cr=cosf(roll/2),sr=sinf(roll/2),cp=cosf(pitch/2),sp=sinf(pitch/2);
         float cy=cosf(yaw/2),sy=sinf(yaw/2);
         s->q[0]=cr*cp*cy+sr*sp*sy; s->q[1]=sr*cp*cy-cr*sp*sy;
@@ -114,11 +117,11 @@ bool MotionEstimator_Update(MotionEstimator *e, const float accel[3], const floa
     s->valid=true;
     return true;
 }
-void MotionEstimator_GetEuler(const MotionEstimator *e, float out[3])
+void MotionEstimator_GetEuler(const MotionEstimator *e, EulerAnglesDeg *out)
 {
     if (!e || !out) return;
     const float *q=e->state.q;
-    out[0]=atan2f(2*(q[0]*q[1]+q[2]*q[3]),1-2*(q[1]*q[1]+q[2]*q[2]))*57.29577951f;
-    out[1]=asinf(clamp(2*(q[0]*q[2]-q[3]*q[1]),-1,1))*57.29577951f;
-    out[2]=atan2f(2*(q[0]*q[3]+q[1]*q[2]),1-2*(q[2]*q[2]+q[3]*q[3]))*57.29577951f;
+    out->roll=atan2f(2*(q[0]*q[1]+q[2]*q[3]),1-2*(q[1]*q[1]+q[2]*q[2]))*57.29577951f;
+    out->pitch=asinf(clamp(2*(q[0]*q[2]-q[3]*q[1]),-1,1))*57.29577951f;
+    out->yaw=atan2f(2*(q[0]*q[3]+q[1]*q[2]),1-2*(q[2]*q[2]+q[3]*q[3]))*57.29577951f;
 }

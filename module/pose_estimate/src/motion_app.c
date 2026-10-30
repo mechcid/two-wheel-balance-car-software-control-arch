@@ -1,63 +1,89 @@
 #include "motion_app.h"
 #include "sensor_app.h"
-#include "timebase.h"
 
-static MotionEstimator estimator;
+static MotionEstimator estimator; /* 四元数和滤波状态仅在模块内使用。 */
+static MotionSample sample;
 static MotionAppStatus status;
-static uint32_t last_poll_us, last_sample_us, last_sequence;
-static bool started, have_time;
+static uint32_t last_sample_us, last_sequence;
+static bool started, have_time, have_sequence;
+static MotionClockFn motion_clock_now_us;
 
-bool MotionApp_Init(const MotionConfig *config)
+bool MotionApp_Init(const MotionConfig *config, MotionClockFn clock_now_us)
 {
-    if (started || !MotionEstimator_Init(&estimator,config)) return false;
-    last_poll_us=Timebase_NowUs();
+    if (started || !clock_now_us || !MotionEstimator_Init(&estimator,config)) return false;
+    motion_clock_now_us=clock_now_us;
+    status.state=MOTION_WAITING_INPUT;
     started=true;
     return true;
 }
-uint32_t MotionApp_TimeUntilSampleUs(void)
+
+static void invalidate_input(MotionRunState reason)
 {
-    if (!started) return 0;
-    uint32_t elapsed=Timebase_NowUs()-last_poll_us;
-    return elapsed<IMU_PERIOD_US ? IMU_PERIOD_US-elapsed : 0;
+    if (have_time) MotionEstimator_Invalidate(&estimator);
+    have_time=false;
+    sample.valid=false;
+    sample.discontinuity=estimator.state.discontinuity;
+    status.accel_trusted=false;
+    status.state=reason;
 }
-void MotionApp_Poll(void)
+
+/* 一份输入只尝试一次；成功后统一发布角度及其元信息。 */
+static bool MotionApp_Update(const ImuSample *input)
 {
-    if (!started) return;
-    uint32_t now=Timebase_NowUs();
-    if (have_time && (uint32_t)(now-last_sample_us)>=IMU_TIMEOUT_US) {
-        MotionEstimator_Invalidate(&estimator);
-        have_time=false;
-    }
-    uint32_t periods=(uint32_t)(now-last_poll_us)/IMU_PERIOD_US;
-    if (!periods) return;
-    /* 按原截止时间推进；积压只读取最新值，不补读历史帧。 */
-    last_poll_us+=periods*IMU_PERIOD_US;
-    status.missed_periods+=periods-1;
-    HAL_StatusTypeDef result=SensorApp_Update();
-    status.sensor_hz=SensorApp_GetOutputRate();
-    if (result==HAL_BUSY) { ++status.no_data; return; }
-    if (result!=HAL_OK) {
-        ++status.failures;
-        MotionEstimator_Invalidate(&estimator);
-        have_time=false;
-        return;
-    }
-    const ImuSample *s=SensorApp_GetSample();
-    if (!s->valid || (have_time && s->sequence==last_sequence)) return;
-    uint32_t elapsed=s->timestamp_us-last_sample_us;
+    uint32_t elapsed=input->timestamp_us-last_sample_us;
     if (have_time && elapsed>=IMU_TIMEOUT_US) {
         MotionEstimator_Invalidate(&estimator);
         have_time=false;
     }
     float dt=have_time ? (float)elapsed*0.000001f : 0;
-    last_sample_us=s->timestamp_us;
-    last_sequence=s->sequence;
+    last_sample_us=input->timestamp_us;
+    last_sequence=input->sequence;
+    have_sequence=true;
     have_time=true;
     status.last_dt_s=dt;
-    status.timestamp_us=s->timestamp_us;
-    if (MotionEstimator_Update(&estimator,s->data.accel,s->data.gyro,dt)) ++status.updates;
-    else ++status.failures;
+    bool ok=MotionEstimator_Update(&estimator,input->data.accel,input->data.gyro,dt);
+    status.accel_trusted=estimator.state.accel_trusted;
+    if (!ok) {
+        sample.valid=false;
+        sample.discontinuity=estimator.state.discontinuity;
+        ++status.fail_update_count;
+        status.state=MOTION_ESTIMATION_FAILED;
+        return false;
+    }
+    MotionSample next={.timestamp_us=input->timestamp_us,
+        .sequence=sample.sequence+1U,.valid=true,
+        .discontinuity=estimator.state.discontinuity};
+    MotionEstimator_GetEuler(&estimator,&next.data);
+    sample=next;
+    ++status.succ_update_count;
+    status.state=MOTION_RUNNING;
+    return true;
 }
-const MotionState *MotionApp_GetState(void) { return &estimator.state; }
+
+void MotionApp_Poll(void)
+{
+    if (!started) return;
+    uint32_t now=motion_clock_now_us();
+    const ImuSample *input=SensorApp_GetSample();
+    if (!SensorApp_GetStatus()->ready) {
+        invalidate_input(MOTION_INPUT_UNAVAILABLE);
+        return;
+    }
+    if (!input->valid && !have_sequence && input->sequence==0) {
+        status.state=MOTION_WAITING_INPUT;
+        return;
+    }
+    if ((uint32_t)(now-input->timestamp_us)>=IMU_TIMEOUT_US) {
+        invalidate_input(MOTION_INPUT_TIMEOUT);
+        return;
+    }
+    if (!input->valid) {
+        invalidate_input(MOTION_INPUT_UNAVAILABLE);
+        return;
+    }
+    if (have_sequence && input->sequence==last_sequence) return;
+    (void)MotionApp_Update(input);
+}
+
+const MotionSample *MotionApp_GetSample(void) { return &sample; }
 const MotionAppStatus *MotionApp_GetStatus(void) { return &status; }
-void MotionApp_GetEuler(float degrees[3]) { MotionEstimator_GetEuler(&estimator,degrees); }

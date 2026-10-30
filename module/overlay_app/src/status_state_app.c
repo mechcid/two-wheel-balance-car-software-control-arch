@@ -16,19 +16,18 @@ static bool have_pitch;
 static const uint32_t max_attitude_age_us=7500, state_timeout_us=20000;
 static void on_motor_feedback(const MotorAppStatus *m){
     if (have_sample && m->sequence==state.motor_sequence) return;
-    const MotionState *pose=MotionApp_GetState();
-    const MotionAppStatus *timing=MotionApp_GetStatus();
+    const MotionSample *pose=MotionApp_GetSample();
     const ImuSample *imu=SensorApp_GetSample();
     uint32_t faults=0;
     if (!m->valid || !m->left.feedback_valid || !m->right.feedback_valid) faults|=STATUS_STATE_MOTOR_INVALID;
     if (!pose->valid || pose->discontinuity || !imu->valid)
         faults|=STATUS_STATE_ATTITUDE_INVALID;
-    if (timing->timestamp_us!=imu->timestamp_us ||
-        (uint32_t)(m->timestamp_us-timing->timestamp_us)>max_attitude_age_us)
+    if (pose->timestamp_us!=imu->timestamp_us ||
+        (uint32_t)(m->timestamp_us-pose->timestamp_us)>max_attitude_age_us)
         faults|=STATUS_STATE_TIME_MISMATCH;
-    float angles[3]; MotionApp_GetEuler(angles);
+    const EulerAnglesDeg angles=pose->data;
     const float radians=0.017453292519943295f;
-    float roll=angles[0]*radians, theta=angles[1]*radians, psi=angles[2]*radians;
+    float roll=angles.roll*radians, theta=angles.pitch*radians, psi=angles.yaw*radians;
     float q=imu->data.gyro[1]*radians, r=imu->data.gyro[2]*radians;
     // ZYX 欧拉角导数；不要把机体系 gyro Y/Z 直接当作欧拉角导数。
     float theta_dot=q*cosf(roll)-r*sinf(roll);
@@ -61,7 +60,7 @@ static void on_motor_feedback(const MotorAppStatus *m){
         state.theta_dot_radps=theta_dot; state.psi_dot_radps=psi_dot;
     }
     state.timestamp_us=m->timestamp_us;
-    state.attitude_timestamp_us=timing->timestamp_us;
+    state.attitude_timestamp_us=pose->timestamp_us;
     state.motor_sequence=m->sequence;
     ++state.sequence;
     state.faults=faults;
@@ -86,7 +85,7 @@ void StatusStateApp_Poll(uint32_t now)
         state.valid=false;
         state.faults|=STATUS_STATE_STALE;
     }
-    if (!MotionApp_GetState()->valid || MotionApp_GetState()->discontinuity ||
+    if (!MotionApp_GetSample()->valid || MotionApp_GetSample()->discontinuity ||
         !SensorApp_GetSample()->valid) {
         state.valid=false;
         state.faults|=STATUS_STATE_ATTITUDE_INVALID;

@@ -2,6 +2,13 @@
 #define MOTION_ESTIMATOR_H
 #include <stdbool.h>
 
+/* 欧拉角，单位为度；外禀 XYZ，等价于内禀 ZYX。 */
+typedef struct {
+    float roll;
+    float pitch;
+    float yaw;
+} EulerAnglesDeg;
+
 /* 纯姿态算法，不依赖 HAL。机体和参考系均使用右手坐标系；参考系 Z 向上。
  * 四元数将机体坐标转换到参考坐标，顺序为 w、x、y、z。 */
 typedef struct {
@@ -11,11 +18,13 @@ typedef struct {
     float accel_tolerance_g;    /* 模长偏离 1g 的允许范围。 */
     float max_dt_s;            /* 超过此间隔时姿态失效，等待可信测量重建。 */
 } MotionConfig;
+
 typedef struct {
     float q[4];
     bool valid, accel_trusted;
     bool discontinuity;       /* 曾发生缺样，不能保证相对姿态的连续性；初始化清除。 */
 } MotionState;
+
 typedef struct {
     MotionConfig config;
     MotionState state;
@@ -33,5 +42,5 @@ bool MotionEstimator_Update(MotionEstimator *estimator, const float accel[3],
 /* 外部通信失败等缺样事件：保留四元数，置无效并标记姿态不连续。 */
 void MotionEstimator_Invalidate(MotionEstimator *estimator);
 /* 输出 roll、pitch、yaw，单位度；yaw 是相对启动方向，不能确定绝对航向。 */
-void MotionEstimator_GetEuler(const MotionEstimator *estimator, float degrees[3]);
+void MotionEstimator_GetEuler(const MotionEstimator *estimator, EulerAnglesDeg *angles);
 #endif

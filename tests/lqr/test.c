@@ -42,7 +42,7 @@ int main(int argc, char **argv) {
     if (argc>1) {
         trace=&imu_trace.recorder; assert(TraceApp_Arm(trace));
         TraceApp_Poll(trace,1); assert(TraceApp_GetStatus(trace)->mode==TRACE_ARMED);
-        imu_health.ready=true; imu_health.reads=1;
+        imu_health.ready=true; imu_health.succ_read_count=1;
         imu=(ImuSample){.valid=true,.sequence=9,.timestamp_us=100,.data={{1,2,3},{4,5,6}}};
         TraceApp_Poll(trace,500);TraceApp_Poll(trace,600);
         assert(TraceApp_GetStatus(trace)->count==1);
@@ -178,7 +178,7 @@ int main(int argc, char **argv) {
     near(f.data.relative_rpm[0],12);near(f.data.relative_rpm[1],34);
     // Simultaneous real adapters: LQR fault freezes only LQR; IMU keeps recording.
     assert(TraceApp_Arm(&imu_trace.recorder));
-    imu_health.ready=true; imu_health.reads=1;
+    imu_health.ready=true; imu_health.succ_read_count=1;
     imu=(ImuSample){.valid=true,.sequence=1,.timestamp_us=now,.data={{1,2,3},{4,5,6}}};
     frame(now); assert(DebugApp_StartTrial(now,false));
     now+=5000; frame(now); update(now);

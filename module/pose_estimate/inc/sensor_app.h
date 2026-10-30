@@ -41,19 +41,23 @@ typedef struct {
     uint32_t bus_error;          /* 记录 reason 时同步保存的底层错误码，防止后续变化影响诊断。 */
 } SensorStatus;
 
-/* 单实例，仅在主循环中访问；不负责调度、日志或显示。
+/* 单实例，仅在主循环中访问；管理自身采集周期，不负责其他模块的调度、日志或显示。
  * 初始化清空样本和统计，并复制传入的校准参数；传 NULL 使用零偏 0、比例 1。
  * 初始化时绑定时钟函数，重连保留绑定。
  * 总线或时钟函数为空、校准参数非法时返回 HAL_ERROR，不改变已有状态、不访问硬件。
  * 重连保留已有数值、序号、校准参数和统计，但清除 valid。两种初始化路径目前都会在 MPU
- * 驱动中阻塞等待；由调用者决定重试时机。 */
+ * 驱动中阻塞等待；由调用者决定重试时机。初始化或重连结束后等待一个周期再采集。 */
 HAL_StatusTypeDef SensorApp_Init(I2C_HandleTypeDef *bus, const SensorCalibration *initial_calibration,
                                   SensorClockFn clock_now_us);
 HAL_StatusTypeDef SensorApp_Reconnect(void);
-/* 检查数据就绪；无新样本返回 HAL_BUSY，不增加序号及失败计数。
- * 旧数据超时则清除 valid；未绑定时钟时返回 HAL_ERROR。 */
-HAL_StatusTypeDef SensorApp_Update(void);
+/* 唯一公开的采集推进入口，由主循环持续调用。
+ * 每次检查样本超时，到期后执行一次内部更新；积压不补读。
+ * 周期未到或无新数据不增加序号及失败计数，不覆盖诊断快照；未初始化时不执行。 */
+void SensorApp_Poll(void);
+/* 只读查询距下一次计划采集的微秒余量；未初始化或已到期返回 0。 */
+uint32_t SensorApp_TimeUntilSampleUs(void);
 float SensorApp_GetOutputRate(void);
+
 const ImuSample *SensorApp_GetSample(void);
 const SensorStatus *SensorApp_GetStatus(void);
 /* 修正结果 =（输入物理量 - 零偏）× 比例。

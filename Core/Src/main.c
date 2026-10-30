@@ -72,7 +72,8 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN 0 */
 static LqrTrace lqr_trace;
 static ImuTrace imu_trace;
-static uint32_t last_state_deadline_us;
+static uint32_t last_control_sample_sequence;
+static bool have_control_sample;
 static bool sample_available(void)
 {
   const ImuSample *sample = SensorApp_GetSample();
@@ -82,11 +83,10 @@ static bool sample_available(void)
 static void display_task(void *context){
   //渲染任务和推送任务被分离了，这里只负责渲染，推到oled的部分被分到了oled_task部分
   (void)context;
-  float angles[3];
-  MotionApp_GetEuler(angles);
+  const MotionSample *pose=MotionApp_GetSample();
   bool available=sample_available() &&
-      (uint32_t)(Timebase_NowUs()-MotionApp_GetStatus()->timestamp_us)<IMU_TIMEOUT_US;
-  DisplayApp_Render(MotionApp_GetState(), angles, available);
+      (uint32_t)(Timebase_NowUs()-pose->timestamp_us)<IMU_TIMEOUT_US;
+  DisplayApp_Render(pose, available);
 }
 
 //区分了两个串口任务，分别是串口打印任务
@@ -108,7 +108,7 @@ static void oled_task(void *context){
   (void)context;
   /* 8 字节分块，允许在姿态和整车状态计算后的剩余时间刷新。 */
   //很大胆的设计，将i2c总线被mpu占用后的剩余量全都用来推oled，我并不是很喜欢这样做，后续可以看看怎么优化
-  if (MotionApp_TimeUntilSampleUs() >= OLED_POLL_BUDGET_US) DisplayApp_Poll();
+  if (SensorApp_TimeUntilSampleUs() >= OLED_POLL_BUDGET_US) DisplayApp_Poll();
 }
 static void sensor_retry_task(void *context)
 {
@@ -188,7 +188,7 @@ int main(void)
   MotorApp_Init(motor_config, Timebase_NowUs());
   /* 加速度输出保留三轴反号；解算内部恢复为右手坐标系中的比力。 */
   MotionConfig motion_config=MotionEstimator_DefaultConfig();
-  if (!MotionApp_Init(&motion_config)) Error_Handler();
+  if (!MotionApp_Init(&motion_config, Timebase_NowUs)) Error_Handler();
   if (motor_config && !StatusStateApp_Init(motor_config->left.radius_m,
                                            motor_config->right.radius_m)) Error_Handler();
   LqrConfig lqr_config=LqrApp_DefaultConfig();
@@ -197,7 +197,6 @@ int main(void)
   /* 两个记录器拥有独立的类型化数组；初始化不启动记录或电机。 */
   if (!LqrTrace_Init(&lqr_trace) || !ImuTrace_Init(&imu_trace)) Error_Handler();
   if (!DebugApp_Init(&lqr_trace,&imu_trace)) Error_Handler();
-  last_state_deadline_us=Timebase_NowUs();
   Scheduler_Init(tasks, TASK_COUNT, HAL_GetTick());
 
   /* USER CODE END 2 */
@@ -209,15 +208,21 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    MotionApp_Poll(); /* 优先处理 200 Hz 采集截止时间；阻塞式 I2C 不在中断内执行。 */
+    SensorApp_Poll(); /* 模块内部管理采集周期，主循环先推进采集，再处理姿态与控制。 */
+    MotionApp_Poll(); /* 只消费样本，不触发采集。 */
     uint32_t now=Timebase_NowUs();
-    StatusStateApp_Poll(now);
-    LqrApp_Poll(now);
-    uint32_t periods=(uint32_t)(now-last_state_deadline_us)/LQR_PERIOD_US;
-    if (periods) {
-      last_state_deadline_us+=periods*LQR_PERIOD_US;
+    const ImuSample *sample=SensorApp_GetSample();
+    /* 控制消费本轮新姿态，不另建与采集相位无关的 5 ms 计划。
+     * 先生成整车状态，再检查控制时效，避免用上一帧误判过期。 */
+    if (sample->valid && (uint32_t)(now-sample->timestamp_us)<IMU_TIMEOUT_US &&
+        (!have_control_sample || sample->sequence!=last_control_sample_sequence)) {
+      last_control_sample_sequence=sample->sequence;
+      have_control_sample=true;
       StatusStateApp_Update(now);
       LqrApp_Update(Timebase_NowUs());
+    } else {
+      StatusStateApp_Poll(now);
+      LqrApp_Poll(now);
     }
     DebugApp_Poll(Timebase_NowUs());
     Scheduler_Run(tasks, TASK_COUNT, HAL_GetTick());

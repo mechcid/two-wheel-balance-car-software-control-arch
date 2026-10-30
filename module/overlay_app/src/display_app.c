@@ -42,18 +42,19 @@ static void format_angle(float degrees, char text[8])
              tenths / 10, tenths % 10);
 }
 
-void DisplayApp_Render(const MotionState *motion, const float degrees[3], bool available)
+void DisplayApp_Render(const MotionSample *motion, bool available)
 {
     if (!OLED_IsReady()) return;
-    if (!motion || !degrees || !motion->valid || !available) {
+    if (!motion || !motion->valid || !available) {
         show_waiting();
         return;
     }
     OLED_ShowString(1, 1, motion->discontinuity ? "ATTITUDE GAP    " : "ATTITUDE / deg  ");
+    const float values[] = {motion->data.roll, motion->data.pitch, motion->data.yaw};
     static const char *labels[] = {"Roll", "Pitch", "Yaw"};
     for (unsigned i = 0; i < 3; ++i) {
         char angle[8], row[17];
-        format_angle(degrees[i], angle);
+        format_angle(values[i], angle);
         snprintf(row, sizeof(row), "%-5s %6.6s    ", labels[i], angle);
         OLED_ShowString(i + 2, 1, row);
     }

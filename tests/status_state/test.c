@@ -6,16 +6,12 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
-static MotionState pose;
-static MotionAppStatus timing;
+static MotionSample pose;
 static ImuSample imu;
-static float angles[3];
 static MotorAppFeedbackCallback callback;
 static MotorAppStatus motor;
-const MotionState *MotionApp_GetState(void) { return &pose; }
-const MotionAppStatus *MotionApp_GetStatus(void) { return &timing; }
+const MotionSample *MotionApp_GetSample(void) { return &pose; }
 const ImuSample *SensorApp_GetSample(void) { return &imu; }
-void MotionApp_GetEuler(float out[3]) { for(int i=0;i<3;i++) out[i]=angles[i]; }
 void MotorApp_SetFeedbackCallback(MotorAppFeedbackCallback cb) { callback=cb; }
 void MotorApp_Update(uint32_t now) { (void)now; callback(&motor); }
 static void near(float a,float b) { assert(fabsf(a-b)<0.0001f); }
@@ -24,7 +20,7 @@ static void frame(uint32_t t, uint32_t seq, float left, float right) {
     motor.left.delta_displacement_m=left; motor.right.delta_displacement_m=right;
     motor.left.velocity_mps=left*100; motor.right.velocity_mps=right*100;
     motor.left.feedback_valid=motor.right.feedback_valid=true;
-    timing.timestamp_us=imu.timestamp_us=t-2000;
+    pose.timestamp_us=imu.timestamp_us=t-2000;
     callback(&motor);
 }
 int main(void) {
@@ -57,13 +53,13 @@ int main(void) {
     assert(StatusStateApp_GetState()->faults&STATUS_STATE_MOTOR_INVALID);
     assert(StatusStateApp_Init(0.0325f,0.0325f)); frame(20000,2,0,0);
     seq=StatusStateApp_GetState()->sequence;
-    angles[0]=30; angles[1]=20; angles[2]=179;
+    pose.data.roll=30; pose.data.pitch=20; pose.data.yaw=179;
     imu.data.gyro[1]=10; imu.data.gyro[2]=20;
     frame(30000,3,0,0); assert(StatusStateApp_GetVector(v));
     near(v[2],20*0.01745329252f);
     near(v[5],(10*cosf(0.523598776f)-20*sinf(0.523598776f))*0.01745329252f);
     near(v[6],(10*sinf(0.523598776f)+20*cosf(0.523598776f))*0.01745329252f/cosf(v[2]));
-    angles[2]=-179; frame(40000,4,0,0); near(StatusStateApp_GetState()->psi_rad,181*0.01745329252f);
+    pose.data.yaw=-179; frame(40000,4,0,0); near(StatusStateApp_GetState()->psi_rad,181*0.01745329252f);
     StatusStateApp_Poll(60001); assert(!StatusStateApp_GetVector(v));
     assert(StatusStateApp_GetState()->sequence==seq+2);
     motor.sequence=5; motor.timestamp_us=70000; callback(&motor);
@@ -71,32 +67,32 @@ int main(void) {
     frame(80000,6,0.01f,0.01f);
     assert(!StatusStateApp_GetState()->valid);
     assert(StatusStateApp_GetState()->faults&STATUS_STATE_POSITION_DISCONTINUOUS);
-    assert(StatusStateApp_Init(0.0325f,0.0325f)); angles[0]=angles[1]=angles[2]=0;
+    assert(StatusStateApp_Init(0.0325f,0.0325f)); pose.data.roll=pose.data.pitch=pose.data.yaw=0;
     frame(100000,1,0,0); pose.valid=false; StatusStateApp_Poll(100001);
     pose.valid=true; frame(110000,2,0,0); assert(!StatusStateApp_GetState()->valid);
     motor.sequence++; motor.left.feedback_valid=false; callback(&motor);
     assert(StatusStateApp_GetState()->faults&STATUS_STATE_MOTOR_INVALID);
-    assert(StatusStateApp_Init(0.0325f,0.0325f)); angles[1]=90; frame(120000,1,0,0);
+    assert(StatusStateApp_Init(0.0325f,0.0325f)); pose.data.pitch=90; frame(120000,1,0,0);
     assert(StatusStateApp_GetState()->faults&STATUS_STATE_ATTITUDE_INVALID);
     // 两轮对地不转：编码器读数为 -radius * theta，补偿后 v/x/y 应为零。
     assert(!StatusStateApp_Init(0,0.0325f));
     assert(!StatusStateApp_Init(NAN,0.0325f));
     assert(StatusStateApp_Init(0.03f,0.04f));
-    angles[0]=angles[1]=angles[2]=0;
+    pose.data.roll=pose.data.pitch=pose.data.yaw=0;
     imu.data.gyro[1]=imu.data.gyro[2]=0;
     frame(130000,1,0,0);
     const float pitch_step=0.01f;
-    angles[1]=pitch_step/0.01745329252f;
+    pose.data.pitch=pitch_step/0.01745329252f;
     imu.data.gyro[1]=1/0.01745329252f;
     frame(140000,2,-0.03f*pitch_step,-0.04f*pitch_step);
     assert(StatusStateApp_GetVector(v)); near(v[0],0); near(v[1],0); near(v[4],0);
     callback(&motor); near(StatusStateApp_GetState()->x_m,0);
     // 相反方向俯仰也抵消，使用不同轮半径以验证逐轮换算。
-    angles[1]=0; imu.data.gyro[1]=-1/0.01745329252f;
+    pose.data.pitch=0; imu.data.gyro[1]=-1/0.01745329252f;
     frame(150000,3,0.03f*pitch_step,0.04f*pitch_step);
     assert(StatusStateApp_GetVector(v)); near(v[0],0); near(v[4],0);
     // 同时真实前进 1 mm，补偿只消除车身俯仰部分。
-    angles[1]=pitch_step/0.01745329252f; imu.data.gyro[1]=1/0.01745329252f;
+    pose.data.pitch=pitch_step/0.01745329252f; imu.data.gyro[1]=1/0.01745329252f;
     frame(160000,4,0.001f-0.03f*pitch_step,0.001f-0.04f*pitch_step);
     assert(StatusStateApp_GetVector(v)); near(v[0],0.001f); near(v[4],0.1f);
     puts("PASS: body pitch compensation, both signs, unequal radii, translation plus pitch");
