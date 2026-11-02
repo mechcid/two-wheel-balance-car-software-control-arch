@@ -53,7 +53,6 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     module/base/src/timebase.c
     module/base/src/TIM_IT.c
-    module/overlay_app/src/odometry_app.c
     module/overlay_app/src/lqr_app.c
     module/overlay_app/src/status_state_app.c
     module/base/src/mpu6050.c
@@ -69,6 +68,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     module/pose_estimate/src/sensor_app.c
     module/pose_estimate/src/motion_estimator.c
     module/pose_estimate/src/motion_app.c
+    module/pose_estimate/src/odometry_app.c
 
     module/debug/src/debug_app.c
     module/debug/src/trace_sources.c

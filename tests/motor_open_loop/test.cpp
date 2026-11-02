@@ -55,11 +55,10 @@ static void test_displacement()
     speed_near(motor.state().velocity_mps,circumference/0.01f);
     assert(motor.state().delta_valid);
     small_near(motor.state().delta_displacement_m,circumference);
-    assert(std::fabs(motor.state().signed_travel_m-circumference)<1e-6f);
-    // 同样计数与 dt 无关；前进一圈再退一圈，净行程为零。
+    // 同样计数与 dt 无关；前进一圈再退一圈，净累计计数为零。
     timer.CNT=0;
     assert(motor.updateFeedback(0.02f));
-    assert(motor.state().total_counts==0 && motor.state().signed_travel_m==0);
+    assert(motor.state().total_counts==0 && motor.state().total_counts_valid);
     small_near(motor.state().delta_displacement_m,-circumference);
     speed_near(motor.state().velocity_mps,-circumference/0.02f);
     assert(!motor.updateFeedback(0));
@@ -69,29 +68,31 @@ static void test_displacement()
     assert(motor.stop() && motor.rebaseFeedback(0.01f));
     assert(motor.state().feedback_valid);
     speed_near(motor.state().velocity_mps,100*circumference/1456/0.01f);
-    assert(motor.state().total_counts==100 && motor.state().travel_valid);
+    assert(motor.state().total_counts==100 && motor.state().total_counts_valid);
     assert(motor.rebaseFeedback() && motor.state().total_counts==100);
     assert(!motor.state().feedback_valid);
     timer.CNT=90;
     assert(motor.updateFeedback(0.01f) && motor.state().total_counts==90);
-    // 恰好半量程无法确定方向，保留数值并永久标记本段行程不连续。
+    // 恰好半量程无法确定方向，保留数值并永久标记累计计数不连续。
     timer.CNT=90+32768;
     assert(!motor.updateFeedback(0.01f));
-    assert(!motor.state().travel_valid && motor.state().total_counts==90);
+    assert(!motor.state().total_counts_valid && motor.state().total_counts==90);
     assert(!motor.state().delta_valid && motor.state().delta_displacement_m==0);
     assert(motor.rebaseFeedback());
     assert(!motor.state().delta_valid);
     timer.CNT+=10;
     assert(motor.updateFeedback(0.01f));
-    assert(motor.state().total_counts==100 && !motor.state().travel_valid);
+    assert(motor.state().total_counts==100 && !motor.state().total_counts_valid);
     assert(motor.state().delta_valid);
+    assert(motor.begin());
+    assert(motor.state().total_counts==0 && motor.state().total_counts_valid);
     // 新 begin 建立新原点；反向配置与计数器回绕。
     c.encoder_reversed=true; timer.CNT=5;
     Motor reversed(c); assert(reversed.begin());
     timer.CNT=65526;
     assert(reversed.updateFeedback(0.01f));
     assert(reversed.state().total_counts==15);
-    assert(reversed.state().signed_travel_m>0);
+    assert(reversed.state().delta_displacement_m>0);
     float original_velocity=reversed.state().velocity_mps;
     c.radius_m*=2;
     Motor larger(c); assert(larger.begin());
@@ -218,7 +219,7 @@ int main()
     MotorApp_Update(now);
     assert(!enabled && pwm.CCR3==0 && pwm.CCR4==0);
     assert(MotorApp_GetStatus()->valid);
-    assert(!MotorApp_GetStatus()->right.travel_valid);
+    assert(!MotorApp_GetStatus()->right.total_counts_valid);
     const int64_t before_stop=MotorApp_GetStatus()->left.total_counts;
     float before_consumed=consumed_left;
     uint32_t before_sequence=MotorApp_GetStatus()->sequence;

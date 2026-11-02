@@ -16,7 +16,7 @@ public:
     bool begin(){
         initialized_ = false;
         clear_delta();
-        state_.travel_valid = false;
+        state_.total_counts_valid = false;
         state_.feedback_valid = false;
         if (!validConfig()) return false;
         if (!stop()) return false;
@@ -24,8 +24,7 @@ public:
         initialized_ = Encoder_Init(config_.encoder);
         if (initialized_) {
             state_.total_counts = 0;
-            state_.signed_travel_m = 0;
-            state_.travel_valid = true;
+            state_.total_counts_valid = true;
         }
         return initialized_;
     }
@@ -51,7 +50,7 @@ public:
         return update_speed(delta, dt_s);
     }
     /* 重建测速基准前补计尚未读取的位移；正常启停不清累计值。
-     * 失效基准无法恢复缺失计数，travel_valid 保持 false。
+     * 失效基准无法恢复缺失计数，total_counts_valid 保持 false。
      * 提供有效 dt_s 时同时更新速度；默认只重建基准，速度标记无效。 */
     bool rebaseFeedback(float dt_s = 0){
         clear_delta();
@@ -60,12 +59,12 @@ public:
         int32_t delta;
         // 成功采集已推进基准，不再二次读取 CNT，以免漏掉两次读取间的计数。
         if (capture_position(delta)) {
-            // 无有效区间时只补计行程；不能把保留的旧速度当成本次反馈。
+            // 无有效区间时只补计编码器计数；不能把保留的旧速度当成本次反馈。
             update_speed(delta, dt_s);
             return true;
         }
         bool ready = Encoder_Init(config_.encoder);
-        if (!ready) state_.travel_valid = false;
+        if (!ready) state_.total_counts_valid = false;
         return ready;
     }
 
@@ -127,35 +126,32 @@ private:
         state_.delta_displacement_m = 0;
         state_.delta_valid = false;
     }
-    /* 位移直接累计整数计数，避免逐帧浮点加法或速度积分误差。 */
+    /* 累计编码器整数计数，仅换算本区间位移；路程累计由里程计负责。 */
     //引用符号类似于传指针，但引用符号更安全，不能为null，且不能改变引用的对象。相当于直接对传入参数进行修改操作
     bool capture_position(int32_t &delta){
         clear_delta();
         if (!Encoder_Update(config_.encoder)) {
-            state_.travel_valid = false;
+            state_.total_counts_valid = false;
             return false;
         }
         delta = config_.encoder->delta_cnt;
         if (config_.encoder_reversed) delta = -delta;
         if ((delta>0 && state_.total_counts>INT64_MAX-delta) ||
             (delta<0 && state_.total_counts<INT64_MIN-delta)) {
-            state_.travel_valid = false;
+            state_.total_counts_valid = false;
             return false;
         }
-        //计算总路程，小位移，编码器累积的读数
+        // 更新累计计数和本区间位移，不维护累计轮行程。
         int64_t next = state_.total_counts + delta;
-        float meters = (float)((double)next / config_.counts_per_output_rev *
-                               6.283185307179586 * config_.radius_m);
         float delta_meters = (float)((double)delta / config_.counts_per_output_rev *
                                     6.283185307179586 * config_.radius_m);
-        if (!std::isfinite(meters) || !std::isfinite(delta_meters)) {
-            state_.travel_valid = false;
+        if (!std::isfinite(delta_meters)) {
+            state_.total_counts_valid = false;
             return false;
         }
         state_.delta_displacement_m = delta_meters;
         state_.delta_valid = true;
         state_.total_counts = next;
-        state_.signed_travel_m = meters;
         return true;
     }
     //校验函数，检测传入的配置参数是否合法，不合法则返回false，合法则返回true

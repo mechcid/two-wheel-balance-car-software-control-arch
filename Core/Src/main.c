@@ -212,11 +212,13 @@ int main(void)
     MotionApp_Poll(); /* 只消费样本，不触发采集。 */
     uint32_t now=Timebase_NowUs();
     const ImuSample *sample=SensorApp_GetSample();
-    /* 控制消费本轮新姿态，不另建与采集相位无关的 5 ms 计划。
-     * 先生成整车状态，再检查控制时效，避免用上一帧误判过期。 */
-    if (sample->valid && (uint32_t)(now-sample->timestamp_us)<IMU_TIMEOUT_US &&
-        (!have_control_sample || sample->sequence!=last_control_sample_sequence)) {
-      last_control_sample_sequence=sample->sequence;
+    const MotionSample *pose=MotionApp_GetSample();
+    /* 姿态可能因频率上限延后处理；等待匹配的新姿态再采样电机并控制。
+     * 不能把新 IMU 与旧姿态拼成一帧，也不建立独立控制相位。 */
+    if (sample->valid && pose->valid && pose->timestamp_us==sample->timestamp_us &&
+        (uint32_t)(now-pose->timestamp_us)<IMU_TIMEOUT_US &&
+        (!have_control_sample || pose->sequence!=last_control_sample_sequence)) {
+      last_control_sample_sequence=pose->sequence;
       have_control_sample=true;
       StatusStateApp_Update(now);
       LqrApp_Update(Timebase_NowUs());

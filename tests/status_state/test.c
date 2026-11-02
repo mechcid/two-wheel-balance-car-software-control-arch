@@ -24,19 +24,19 @@ static void frame(uint32_t t, uint32_t seq, float left, float right) {
     callback(&motor);
 }
 int main(void) {
-    OdometryState o; OdometryApp_Init(&o);
+    OdometryState o=OdometryApp_Init();
     OdometryApp_Update(&o,0,0,(0)*100,(0)*100,0,UINT32_MAX,UINT32_MAX-10000,10000,true);
     OdometryApp_Update(&o,0.01f,0.03f,(0.01f)*100,(0.03f)*100,0,0,0,10000,true);
     near(o.x_m,0.02f); near(o.v_mps,2); assert(o.continuous);
     OdometryApp_Update(&o,1,1,(1)*100,(1)*100,0,0,0,10000,true); near(o.x_m,0.02f);
     OdometryApp_Update(&o,-0.01f,-0.01f,(-0.01f)*100,(-0.01f)*100,0,1,10000,10000,true); near(o.x_m,0.01f);
     OdometryApp_Update(&o,1,1,(1)*100,(1)*100,0,3,30000,10000,true); assert(!o.continuous); near(o.x_m,0.01f);
-    OdometryApp_Init(&o);
+    o=OdometryApp_Init();
     OdometryApp_Update(&o,0,0,(0)*100,(0)*100,3.12413936f,1,10000,10000,true);
     OdometryApp_Update(&o,0.01f,0.01f,(0.01f)*100,(0.01f)*100,-3.12413936f,2,20000,10000,true);
     near(o.x_m,-0.01f); near(o.y_m,0);
     OdometryApp_Update(&o,1,1,(1)*100,(1)*100,NAN,3,30000,10000,true); assert(!o.valid && !o.continuous);
-    OdometryApp_Init(&o);
+    o=OdometryApp_Init();
     OdometryApp_Update(&o,0,0,(0)*100,(0)*100,1.570796327f,1,10000,10000,true);
     OdometryApp_Update(&o,0.02f,0.02f,(0.02f)*100,(0.02f)*100,1.570796327f,2,20000,10000,true);
     near(o.x_m,0); near(o.y_m,0.02f);

@@ -5,6 +5,8 @@ static MotionEstimator estimator; /* 四元数和滤波状态仅在模块内使�
 static MotionSample sample;
 static MotionAppStatus status;
 static uint32_t last_sample_us, last_sequence;
+static uint32_t last_update_us;
+static bool have_update_time;
 static bool started, have_time, have_sequence;
 static MotionClockFn motion_clock_now_us;
 
@@ -50,8 +52,10 @@ static bool MotionApp_Update(const ImuSample *input)
         status.state=MOTION_ESTIMATION_FAILED;
         return false;
     }
-    MotionSample next={.timestamp_us=input->timestamp_us,
-        .sequence=sample.sequence+1U,.valid=true,
+    MotionSample next={
+        .timestamp_us=input->timestamp_us,
+        .sequence=sample.sequence+1U,
+        .valid=true,
         .discontinuity=estimator.state.discontinuity};
     MotionEstimator_GetEuler(&estimator,&next.data);
     sample=next;
@@ -65,6 +69,9 @@ void MotionApp_Poll(void)
     if (!started) return;
     uint32_t now=motion_clock_now_us();
     const ImuSample *input=SensorApp_GetSample();
+    /* 即使输入持续更新，处理受限时旧输出也不能无限保持有效。 */
+    if (sample.valid && (uint32_t)(now-sample.timestamp_us)>=IMU_TIMEOUT_US)
+        invalidate_input(MOTION_INPUT_TIMEOUT);
     if (!SensorApp_GetStatus()->ready) {
         invalidate_input(MOTION_INPUT_UNAVAILABLE);
         return;
@@ -82,6 +89,10 @@ void MotionApp_Poll(void)
         return;
     }
     if (have_sequence && input->sequence==last_sequence) return;
+    if (have_update_time &&
+        (uint32_t)(now-last_update_us)<MOTION_MIN_UPDATE_INTERVAL_US) return;
+    last_update_us=now;
+    have_update_time=true;
     (void)MotionApp_Update(input);
 }
 

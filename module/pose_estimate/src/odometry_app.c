@@ -3,14 +3,17 @@
 
 //负责计算车体的位移和速度，使用双轮编码器的增量和姿态模块的航向角来计算车体在平面上的位置变化。
 
-void OdometryApp_Init(OdometryState *s) {
-    //本身不是什么传感器，只是一个集成的数据处理函数，初始化就直接清零
-    *s=(OdometryState){0}; 
+OdometryState OdometryApp_Init(void) {
+    //返回初始状态，实例的存储与生命周期由调用者管理。
+    return (OdometryState){0};
 }
 
-void OdometryApp_Update(OdometryState *s, float left, float right,
-                        float left_velocity, float right_velocity, float psi,
-                        uint32_t seq, uint32_t now, uint32_t dt, bool valid){
+void OdometryApp_Update(
+    OdometryState *s, 
+    float left, float right,
+    float left_velocity, float right_velocity, float psi,
+    uint32_t seq, uint32_t now, uint32_t dt, bool valid){
+        
     //进行合法性校验
     if (s->initialized && seq==s->sequence) return;
     bool consecutive=!s->initialized || (uint32_t)(seq-s->sequence)==1;

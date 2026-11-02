@@ -74,7 +74,7 @@ bool StatusStateApp_Init(float left_radius, float right_radius)
     left_radius_m=left_radius; right_radius_m=right_radius;
     have_pitch=false; last_pitch_rad=0;
     state=(StatusState){0}; have_sample=false; have_yaw=false; last_wrapped_yaw=0;
-    OdometryApp_Init(&odometry);
+    odometry=OdometryApp_Init();
     MotorApp_SetFeedbackCallback(on_motor_feedback);
     return true;
 }

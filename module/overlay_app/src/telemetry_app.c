@@ -37,9 +37,6 @@ static void motor_status(void){
     UART_Printf("WHEEL L=%ld R=%ld mrpm dutyL=%ld dutyR=%ld permille valid=%u,%u\r\n",
         (long)(m->left.rpm*1000),(long)(m->right.rpm*1000),
         (long)(m->left.applied_duty*1000),(long)(m->right.applied_duty*1000),m->left.feedback_valid,m->right.feedback_valid);
-    UART_Printf("WHEEL travelL=%ld travelR=%ld mm valid=%u,%u\r\n",
-        milli(m->left.signed_travel_m),milli(m->right.signed_travel_m),
-        m->left.travel_valid,m->right.travel_valid);
     UART_Printf("STEP seq=%lu dt_us=%lu valid=%u L=%ld R=%ld um wheel_valid=%u,%u\r\n",
         (unsigned long)m->sequence,(unsigned long)m->interval_us,m->valid,
         milli(m->left.delta_displacement_m*1000),milli(m->right.delta_displacement_m*1000),
@@ -235,12 +232,12 @@ void TelemetryApp_ReportAttitude(bool available){
 void TelemetryApp_ReportMotor(const MotorAppStatus *motor){
     if (!initialized || !stream || !motor) return;
     /* 停止状态也输出，便于观察手动转轮；无效数值由对应标志指明。 */
-    UART_Printf("MOTOR,%luus,%u, L %ldrpm, R %ldrpm, L %ldm, R %ldm,%u,%u,%u,%u\r\n",
+    UART_Printf("MOTOR_STEP,%luus,%u, L %ldmrpm, R %ldmrpm, dL %ldum, dR %ldum,%u,%u,%u,%u\r\n",
         (unsigned long)motor->timestamp_us,(unsigned)motor->mode,
         milli(motor->left.rpm),milli(motor->right.rpm),
-        milli(motor->left.signed_travel_m),milli(motor->right.signed_travel_m),
+        milli(motor->left.delta_displacement_m*1000),milli(motor->right.delta_displacement_m*1000),
         motor->left.feedback_valid,motor->right.feedback_valid,
-        motor->left.travel_valid,motor->right.travel_valid);
+        motor->left.delta_valid,motor->right.delta_valid);
 }
 
 // 状态向量周期输出，顺序与 LQR 向量一致；物理量统一放大 1000 倍。

@@ -12,12 +12,21 @@ typedef struct {
     uint32_t sequence, timestamp_us;
     float last_psi_rad;
 } OdometryState;
-void OdometryApp_Init(OdometryState *state);
+/* 返回初始状态；由调用者保存和管理，赋值可重置已有实例。 */
+OdometryState OdometryApp_Init(void);
 /* 每份双轮反馈调用一次；第一次可信采样建立位置原点，不积分之前的行程。
  * 速度直接取左右轮线速度均值；valid 必须同时涵盖两轮增量和速度。
  * sequence 使用电机采样序号，interval_us 对应两轮增量的共同时间区间。 */
-void OdometryApp_Update(OdometryState *state, float left_m, float right_m,
-                        float left_velocity_mps, float right_velocity_mps,
-                        float psi_rad, uint32_t sequence, uint32_t timestamp_us,
-                        uint32_t interval_us, bool valid);
+void OdometryApp_Update(
+    OdometryState *state, 
+    float left_m, 
+    float right_m,
+    float left_velocity_mps, 
+    float right_velocity_mps,
+    float psi_rad, 
+    uint32_t sequence, 
+    uint32_t timestamp_us,
+    uint32_t interval_us, 
+    bool valid);
+    
 #endif

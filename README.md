@@ -96,9 +96,9 @@ TIM1/TIM4 编码器、TIM3 PWM 参数统一在 `.ioc` 和 `tim.c`：PWM PSC=0、
 
 - `IMU,timestamp_us,sequence,ax_mg,ay_mg,az_mg,gx_mdps,gy_mdps,gz_mdps`：只输出有效且新鲜样本。
 - `POSE_US,timestamp_us,valid,roll_mdeg,pitch_mdeg,yaw_mdeg`：失效或过期时输出 valid=0，角度为保留值。
-- `MOTOR,timestamp_us,mode,left_mrpm,right_mrpm,left_mm,right_mm,left_speed_valid,right_speed_valid,left_distance_valid,right_distance_valid`：停止和故障状态也输出，数值是否可用由标志指明。mode=0/1/2/3 分别为 STOPPED/DUTY/FAULT/UNCONFIGURED。
+- `MOTOR_STEP,timestamp_us,mode,left_mrpm,right_mrpm,left_delta_um,right_delta_um,left_speed_valid,right_speed_valid,left_delta_valid,right_delta_valid`：停止和故障状态也输出，数值是否可用由标志指明。mode=0/1/2/3 分别为 STOPPED/DUTY/FAULT/UNCONFIGURED。
 
-以上物理量以整数发送（mrpm 为 RPM × 1000，mm 为 m × 1000）。若同时启用这三类输出，按 32 位最宽数值估算，每轮约 233 字节，500 ms 周期约占用 466 字节/秒。9600 / 8N1 的理论数据吞吐量约为 960 字节/秒，其他周期输出和手动查询仍会占用剩余带宽；可通过 `@status` 查看 `tx_drop`，判断是否发生发送丢弃。
+以上为字段含义，电机行还带有单位标签；mrpm 为 RPM × 1000，位移增量 um 为 m × 1000000。`MOTOR_STEP` 替代旧的累计路程帧，不应按累计路程解析，也不能靠低频遥测重建完整轨迹。9600 / 8N1 的理论数据吞吐量约为 960 字节/秒，其他周期输出和手动查询仍会占用剩余带宽；可通过 `@status` 查看 `tx_drop`，判断是否发生发送丢弃。
 
 ## 运行数据记录与分析
 
