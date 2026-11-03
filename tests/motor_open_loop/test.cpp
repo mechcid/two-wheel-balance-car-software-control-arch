@@ -5,13 +5,14 @@
 #include <cstdio>
 #include <limits>
 #include <initializer_list>
+#include <cstring>
 
 static bool enabled;
 static void enable(bool value) { enabled=value; }
 static void near(float actual, float expected) { assert(std::fabs(actual-expected)<0.01f); }
 static uint32_t callbacks, last_sequence;
 static float consumed_left, consumed_right;
-static void consume(const MotorAppStatus *sample)
+static void consume(const MotorAppSample *sample)
 {
     if (sample->sequence == last_sequence) return;
     assert((uint32_t)(sample->sequence-last_sequence)==1);
@@ -21,7 +22,7 @@ static void consume(const MotorAppStatus *sample)
         consumed_right+=sample->right.delta_displacement_m;
     }
 }
-static void on_feedback(const MotorAppStatus *sample)
+static void on_feedback(const MotorAppSample *sample)
 {
     ++callbacks;
     consume(sample);
@@ -141,27 +142,27 @@ int main()
     assert(!MotorApp_Init(&shared,now));
     MotorApp_SetFeedbackCallback(on_feedback);
     assert(MotorApp_Init(&config,now));
-    assert(callbacks==0 && !MotorApp_GetStatus()->valid);
+    assert(callbacks==0 && !MotorApp_GetSample()->valid);
     assert(!enabled && MotorApp_GetStatus()->mode==MOTOR_STOPPED);
     assert(!MotorApp_Init(&config,now));
     // 停止状态仍测速：编码器双向回绕，微秒时间同时回绕。
     left.CNT=9; right.CNT=65526;
     now+=10000;
-    MotorApp_Update(now);
-    near(MotorApp_GetStatus()->left.rpm,15.0f/1456*6000);
-    near(MotorApp_GetStatus()->right.rpm,15.0f/1456*6000);
+    MotorApp_Poll(now,true);
+    near(MotorApp_GetSample()->left.rpm,15.0f/1456*6000);
+    near(MotorApp_GetSample()->right.rpm,15.0f/1456*6000);
     assert(!enabled && pwm.CCR3==0 && pwm.CCR4==0);
-    assert(MotorApp_GetStatus()->left.total_counts==15);
-    assert(MotorApp_GetStatus()->right.total_counts==15);
-    assert(MotorApp_GetStatus()->timestamp_us==now);
-    assert(callbacks==1 && MotorApp_GetStatus()->sequence==1);
-    assert(MotorApp_GetStatus()->valid && MotorApp_GetStatus()->interval_us==10000);
+    assert(MotorApp_GetSample()->left.total_counts==15);
+    assert(MotorApp_GetSample()->right.total_counts==15);
+    assert(MotorApp_GetSample()->timestamp_us==now);
+    assert(callbacks==1 && MotorApp_GetSample()->sequence==1);
+    assert(MotorApp_GetSample()->valid && MotorApp_GetSample()->interval_us==10000);
     const float per_count=6.28318530718f*0.0325f/1456;
     small_near(consumed_left,15*per_count);
     small_near(consumed_right,15*per_count);
-    consume(MotorApp_GetStatus()); consume(MotorApp_GetStatus());
+    consume(MotorApp_GetSample()); consume(MotorApp_GetSample());
     small_near(consumed_left,15*per_count); // 重复读取不得再累加。
-    MotorApp_Update(now);
+    MotorApp_Poll(now,true);
     assert(callbacks==1); // 同时刻更新不发布。
 
     assert(!MotorApp_SetDuty(0.41f,0,now));
@@ -171,85 +172,116 @@ int main()
     assert(!enabled); // 命令不立即输出。
     assert(callbacks==1); // 提交命令不是新采样。
     now+=12500; left.CNT+=10; right.CNT+=10;
-    MotorApp_Update(now);
+    MotorApp_Poll(now,true);
     assert(enabled && pwm.CCR4==720 && pwm.CCR3==1080);
     assert((gpio.ODR & 15)==9); // 左正向、右反向。
-    near(MotorApp_GetStatus()->left.rpm,10.0f/1456*60/0.0125f);
-    near(MotorApp_GetStatus()->right.rpm,-10.0f/1456*60/0.0125f);
+    near(MotorApp_GetSample()->left.rpm,10.0f/1456*60/0.0125f);
+    near(MotorApp_GetSample()->right.rpm,-10.0f/1456*60/0.0125f);
     assert(MotorApp_SetDuty(-0.1f,0.1f,now));
-    now+=10000; MotorApp_Update(now);
+    now+=10000; MotorApp_Poll(now,true);
     assert((gpio.ODR & 15)==6 && pwm.CCR4==360 && pwm.CCR3==360);
-    assert(MotorApp_GetStatus()->valid && MotorApp_GetStatus()->sequence==3);
-    assert(MotorApp_GetStatus()->left.delta_displacement_m==0);
+    assert(MotorApp_GetSample()->valid && MotorApp_GetSample()->sequence==3);
+    assert(MotorApp_GetSample()->left.delta_displacement_m==0);
     // 续期允许运行超过一秒，停止续期后必须故障关闭两轮。
     for (int i=0;i<150;++i) {
         now+=10000;
         if (i%20==0) MotorApp_KeepAlive(now);
-        MotorApp_Update(now);
+        MotorApp_Poll(now,true);
         assert(enabled);
     }
-    for (int i=0;i<100;++i) { now+=10000; MotorApp_Update(now); }
+    for (int i=0;i<100;++i) { now+=10000; MotorApp_Poll(now,true); }
     assert(!enabled && pwm.CCR3==0 && pwm.CCR4==0);
     assert(MotorApp_GetStatus()->mode==MOTOR_FAULT);
     assert(!MotorApp_SetDuty(0.1f,0.1f,now));
     MotorApp_Stop(now);
     assert(MotorApp_GetStatus()->mode==MOTOR_STOPPED);
     assert(MotorApp_SetDuty(0.1f,0.1f,now));
-    now+=50001; MotorApp_Update(now);
+    uint32_t old_stamp=MotorApp_GetSample()->timestamp_us;
+    uint32_t old_sequence=MotorApp_GetSample()->sequence;
+    now+=50001; MotorApp_Poll(now,false);
     assert(!enabled && MotorApp_GetStatus()->mode==MOTOR_FAULT);
-    assert(!MotorApp_GetStatus()->valid && MotorApp_GetStatus()->interval_us==50001);
+    assert(!MotorApp_GetSample()->valid && MotorApp_GetSample()->timestamp_us==old_stamp);
+    assert(MotorApp_GetSample()->sequence==old_sequence);
+    assert(MotorApp_GetStatus()->faults & MOTOR_SAMPLE_INTERVAL_INVALID);
     // 一个编码器失效，两轮一起停机；恢复必须重新建立基准。
     MotorApp_Stop(now);
     assert(MotorApp_SetDuty(0.2f,0.2f,now));
-    now+=10000; MotorApp_Update(now);
+    now+=10000; MotorApp_Poll(now,true);
     assert(enabled);
+    MotorAppSample previous=*MotorApp_GetSample();
     left.CNT+=3;
     right.ARR=0;
-    now+=10000; MotorApp_Update(now);
+    now+=10000; MotorApp_Poll(now,true);
     assert(!enabled && pwm.CCR3==0 && pwm.CCR4==0);
     assert(MotorApp_GetStatus()->mode==MOTOR_FAULT);
-    assert(!MotorApp_GetStatus()->valid);
-    small_near(MotorApp_GetStatus()->left.delta_displacement_m,3*per_count);
-    assert(MotorApp_GetStatus()->left.delta_valid && !MotorApp_GetStatus()->right.delta_valid);
+    assert(!MotorApp_GetSample()->valid);
+    assert(MotorApp_GetSample()->sequence==previous.sequence);
+    assert(MotorApp_GetSample()->timestamp_us==previous.timestamp_us);
+    assert(MotorApp_GetSample()->left.total_counts==previous.left.total_counts);
+    assert(MotorApp_GetStatus()->faults & MOTOR_RIGHT_FEEDBACK_FAILED);
     right.ARR=65535;
     MotorApp_Stop(now);
     assert(MotorApp_GetStatus()->mode==MOTOR_STOPPED);
-    assert(MotorApp_GetStatus()->left.applied_duty==0 && MotorApp_GetStatus()->right.applied_duty==0);
+    assert(MotorApp_GetStatus()->left_applied_duty==0 && MotorApp_GetStatus()->right_applied_duty==0);
     now+=10000;
-    MotorApp_Update(now);
+    MotorApp_Poll(now,true);
     assert(!enabled && pwm.CCR3==0 && pwm.CCR4==0);
-    assert(MotorApp_GetStatus()->valid);
-    assert(!MotorApp_GetStatus()->right.total_counts_valid);
-    const int64_t before_stop=MotorApp_GetStatus()->left.total_counts;
+    assert(MotorApp_GetSample()->valid);
+    assert(!MotorApp_GetSample()->right.total_counts_valid);
+    assert(MotorApp_GetSample()->discontinuity);
+    const int64_t before_stop=MotorApp_GetSample()->left.total_counts;
     float before_consumed=consumed_left;
-    uint32_t before_sequence=MotorApp_GetStatus()->sequence;
+    uint32_t before_sequence=MotorApp_GetSample()->sequence;
     now+=5000;
     left.CNT=(left.CNT+7U)&65535U;
     MotorApp_Stop(now);
-    assert(MotorApp_GetStatus()->left.total_counts==before_stop+7);
-    assert(MotorApp_GetStatus()->valid && MotorApp_GetStatus()->sequence==before_sequence+1);
+    assert(MotorApp_GetSample()->left.total_counts==before_stop+7);
+    assert(MotorApp_GetSample()->valid && MotorApp_GetSample()->sequence==before_sequence+1);
     small_near(consumed_left-before_consumed,7*per_count);
-    assert(MotorApp_GetStatus()->left.feedback_valid);
-    speed_near(MotorApp_GetStatus()->left.velocity_mps,7*per_count/0.005f);
+    assert(MotorApp_GetSample()->left.feedback_valid);
+    speed_near(MotorApp_GetSample()->left.velocity_mps,7*per_count/0.005f);
     assert(MotorApp_SetDuty(0.1f,0.1f,now));
-    assert(MotorApp_GetStatus()->left.total_counts==before_stop+7);
+    assert(MotorApp_GetSample()->left.total_counts==before_stop+7);
     MotorApp_Stop(now);
     MotorApp_SetFeedbackCallback(nullptr);
     uint32_t before_callbacks=callbacks;
-    now+=10000; MotorApp_Update(now);
+    now+=10000; MotorApp_Poll(now,true);
     assert(callbacks==before_callbacks);
     // Closed-loop application changes PWM immediately, but never consumes feedback.
-    uint32_t seq=MotorApp_GetStatus()->sequence;
-    uint32_t stamp=MotorApp_GetStatus()->timestamp_us;
-    int64_t counts=MotorApp_GetStatus()->left.total_counts;
+    uint32_t seq=MotorApp_GetSample()->sequence;
+    uint32_t stamp=MotorApp_GetSample()->timestamp_us;
+    int64_t counts=MotorApp_GetSample()->left.total_counts;
+    MotorAppSample before_output=*MotorApp_GetSample();
     assert(MotorApp_ApplyDuty(0.2f,-0.1f,now));
     assert(enabled && pwm.CCR4==720 && pwm.CCR3==360);
-    assert(MotorApp_GetStatus()->sequence==seq && MotorApp_GetStatus()->timestamp_us==stamp);
-    assert(MotorApp_GetStatus()->left.total_counts==counts);
+    assert(std::memcmp(&before_output,MotorApp_GetSample(),sizeof before_output)==0);
+    near(MotorApp_GetStatus()->left_applied_duty,0.2f);
+    near(MotorApp_GetStatus()->right_applied_duty,-0.1f);
+    MotorApp_Poll(now+100,false);
+    assert(std::memcmp(&before_output,MotorApp_GetSample(),sizeof before_output)==0);
+    assert(MotorApp_GetSample()->sequence==seq && MotorApp_GetSample()->timestamp_us==stamp);
+    assert(MotorApp_GetSample()->left.total_counts==counts);
     assert(!MotorApp_ApplyDuty(0.5f,0,now));
     assert(!MotorApp_ApplyDuty(0.1f,0.1f,now+7501));
     assert(!MotorApp_ApplyDuty(std::numeric_limits<float>::quiet_NaN(),0,now));
     MotorApp_Stop(now);
+    // 不请求采样仍执行命令超时保护；正常采样间隔排除间隔超时干扰。
+    assert(MotorApp_SetDuty(0.1f,0.1f,now));
+    for (unsigned i=0;i<99;++i) { now+=10000; MotorApp_Poll(now,true); }
+    now+=10000; MotorApp_Poll(now,false);
+    assert(MotorApp_GetStatus()->mode==MOTOR_FAULT && !enabled);
+    assert(MotorApp_GetStatus()->faults==MOTOR_COMMAND_TIMEOUT);
+    MotorApp_Stop(now);
+    // 两个编码器同时故障应同时记录两位，失败不推进发布身份。
+    now+=10000; MotorApp_Poll(now,true);
+    previous=*MotorApp_GetSample();
+    left.ARR=right.ARR=0;
+    now+=10000; MotorApp_Poll(now,true);
+    assert((MotorApp_GetStatus()->faults & (MOTOR_LEFT_FEEDBACK_FAILED|MOTOR_RIGHT_FEEDBACK_FAILED))==
+        (MOTOR_LEFT_FEEDBACK_FAILED|MOTOR_RIGHT_FEEDBACK_FAILED));
+    assert(MotorApp_GetSample()->sequence==previous.sequence);
+    assert(MotorApp_GetSample()->timestamp_us==previous.timestamp_us);
+    assert(!MotorApp_GetSample()->valid && MotorApp_GetSample()->discontinuity);
     std::puts("PASS: delta validity, fresh/duplicate/zero frames, synchronous stop sampling, recovery;");
     std::puts("PASS: count-based displacement, radius validation, stop/restart continuity, gap flag;");
     std::puts("PASS: signed duty, RPM, encoder/time wrap, keepalive, gap timeout, dual-wheel fault/recovery");

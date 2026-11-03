@@ -15,6 +15,14 @@ Trace *DebugApp_GetTrace(DebugTraceSource source)
 {
     return source==DEBUG_TRACE_LQR ? lqr_trace : source==DEBUG_TRACE_IMU ? imu_trace : NULL;
 }
+bool DebugApp_StartHold(uint32_t now)
+{
+    if (LqrApp_GetStatus()->mode!=LQR_DISABLED) return false;
+    TrajectoryApp_Stop();
+    if (!TrajectoryApp_Hold(StatusStateApp_GetState(),now)) return false;
+    if (!LqrApp_Start(now)) { TrajectoryApp_Stop(); return false; }
+    return true;
+}
 bool DebugApp_StartTrial(uint32_t now, bool soft)
 {
     const volatile TraceStatus *s=TraceApp_GetStatus(lqr_trace);
@@ -25,8 +33,8 @@ bool DebugApp_StartTrial(uint32_t now, bool soft)
     LqrTuning trial=saved_tuning;
     if (soft) trial.pitch_rate_scale=.70f;
     if (!LqrApp_SetTuning(&trial)) return false;
-    if (!LqrApp_Start(now)) { LqrApp_SetTuning(&saved_tuning); return false; }
-    if (!TraceApp_Arm(lqr_trace)) { LqrApp_Stop(now); LqrApp_SetTuning(&saved_tuning); return false; }
+    if (!DebugApp_StartHold(now)) { LqrApp_SetTuning(&saved_tuning); return false; }
+    if (!TraceApp_Arm(lqr_trace)) { LqrApp_Stop(now); TrajectoryApp_Stop(); LqrApp_SetTuning(&saved_tuning); return false; }
     trial_started_us=now; trial_active=true;
     return true;
 }
@@ -39,7 +47,7 @@ static void restore_tuning(void)
 void DebugApp_Stop(uint32_t now)
 {
     TraceApp_Poll(lqr_trace,now); /* 在清除业务故障之前先保存异常现场。 */
-    LqrApp_Stop(now);
+    LqrApp_Stop(now); TrajectoryApp_Stop();
     TraceApp_Poll(lqr_trace,now);
     restore_tuning();
 }
@@ -49,7 +57,7 @@ void DebugApp_Poll(uint32_t now)
     TraceApp_Poll(imu_trace,now);
     TraceApp_Poll(lqr_trace,now);
     if (trial_active && LqrApp_IsActive() && (uint32_t)(now-trial_started_us)>=DEBUG_LQR_TRIAL_DURATION_MS*1000U) {
-        LqrApp_Stop(now); TraceApp_Poll(lqr_trace,now);
+        LqrApp_Stop(now); TrajectoryApp_Stop(); TraceApp_Poll(lqr_trace,now);
     }
     restore_tuning();
 }

@@ -5,6 +5,9 @@
 
 static LqrConfig config;
 static LqrStatus status;
+static LqrSample sample;
+
+static uint32_t last_state_sequence;
 static bool initialized;
 static LqrTuning tuning;
 static uint32_t last_control_us, last_sample_us;
@@ -40,17 +43,17 @@ LqrTuning LqrApp_DefaultTuning(void) { return (LqrTuning){.pitch_rate_scale=.5f,
 LqrTuning LqrApp_GetTuning(void) { return tuning; }
 bool LqrApp_SetTuning(const LqrTuning *t)
 {
-    if (!initialized || status.mode==LQR_HOLD || !tuning_valid(t)) return false;
+    if (!initialized || status.mode==LQR_RUNNING || !tuning_valid(t)) return false;
     tuning=*t; return true;
 }
 //进行lqr计算的函数，输出控制力矩
-bool LqrApp_Calculate(const StatusState *s, const float hold[3],
-                     const float rpm[2], const LqrConfig *c, const LqrTuning *t, LqrStatus *out){
+bool LqrApp_Calculate(const StatusState *s, const TrajectoryPoint *hold,
+                     const float rpm[2], const LqrConfig *c, const LqrTuning *t, LqrResult *out){
     //合法性检测
     if (!s || !hold || !rpm || !out || !s->valid || !config_valid(c) || !tuning_valid(t)) return false;
-    for (unsigned i=0;i<3;++i) if (!isfinite(hold[i])) return false;
-    float e[6]={cosf(hold[2])*(s->x_m-hold[0])+sinf(hold[2])*(s->y_m-hold[1]),
-        wrap(s->psi_rad-hold[2]),s->theta_rad,s->v_mps*cosf(s->psi_rad-hold[2]),
+    if (!isfinite(hold->x_m) || !isfinite(hold->y_m) || !isfinite(hold->psi_rad)) return false;
+    float e[6]={cosf(hold->psi_rad)*(s->x_m-hold->x_m)+sinf(hold->psi_rad)*(s->y_m-hold->y_m),
+        wrap(s->psi_rad-hold->psi_rad),s->theta_rad,s->v_mps*cosf(s->psi_rad-hold->psi_rad),
         s->psi_dot_radps,s->theta_dot_radps};
     for (unsigned j=0;j<6;++j) if (!isfinite(e[j])) return false;
     float torque[2], duty[2], estimated[2];
@@ -84,74 +87,92 @@ static bool fresh(const StatusState *s, uint32_t now){
         (uint32_t)(now-s->motion.timestamp_us)<=max_age_us;
 }
 
-//进行错误检测的函数
+/* 事件状态独立于历史成功样本；先切换模式再停机，防止同步反馈重入控制。 */
 static void fault(uint32_t reason, uint32_t now){
-    status.mode=LQR_FAULT; status.faults|=reason; status.data_valid=false;
-    /* Set mode before Stop, which can synchronously publish another state frame. */
-    MotorApp_Stop(now);
-    status.duty[0]=status.duty[1]=0;
+    status.mode=LQR_FAULT;
+    status.faults|=reason;
     status.event_timestamp_us=now;
+    sample.valid=false;
+    MotorApp_Stop(now);
+}
+static bool matching_motor(const StatusState *s,const MotorAppSample *m) {
+    return m->valid && m->left.feedback_valid && m->right.feedback_valid &&
+        s->motor.sequence==m->sequence && s->motor.timestamp_us==m->timestamp_us;
+}
+static bool reference_valid(const TrajectorySample *r,uint32_t now) {
+    return r->valid && r->valid_for_us>0 && r->valid_for_us<=TRAJECTORY_VALID_FOR_US &&
+        (uint32_t)(now-r->timestamp_us)<=r->valid_for_us &&
+        isfinite(r->data.x_m) && isfinite(r->data.y_m) && isfinite(r->data.psi_rad);
 }
 bool LqrApp_Start(uint32_t now){
     if (!initialized || status.mode!=LQR_DISABLED || MotorApp_GetStatus()->mode!=MOTOR_STOPPED)
         return false;
     const StatusState *s=StatusStateApp_GetState();
-    const MotorAppStatus *m=MotorApp_GetStatus();
-    if (!fresh(s,now) || !m->valid || !m->left.feedback_valid || !m->right.feedback_valid ||
-        s->motor.sequence!=m->sequence || fabsf(s->theta_rad)>config.limits.start_angle_rad) return false;
-    LqrStatus next={0};
-    next.hold[0]=s->x_m; next.hold[1]=s->y_m; next.hold[2]=s->psi_rad;
+    const MotorAppSample *m=MotorApp_GetSample();
+    if (!fresh(s,now) || !matching_motor(s,m) || fabsf(s->theta_rad)>config.limits.start_angle_rad)
+        return false;
+    const TrajectorySample *reference=TrajectoryApp_GetSample();
+    if (!reference_valid(reference,now)) return false;
+    LqrResult candidate;
     float rpm[2]={m->left.rpm,m->right.rpm};
-    if (!LqrApp_Calculate(s,next.hold,rpm,&config,&tuning,&next)) return false;
-    next.mode=LQR_HOLD; next.state_sequence=s->sequence;
-    next.duty[0]=next.duty[1]=0; /* No output has been applied yet. */
-    next.sequence=status.sequence; next.event_timestamp_us=now;
-    status=next; last_control_us=now; last_sample_us=s->timestamp_us;
-    /* First output waits for the next complete scheduled state, never a stale frame. */
+    if (!LqrApp_Calculate(s,&reference->data,rpm,&config,&tuning,&candidate)) return false;
+    if (fabsf(candidate.error[0])>config.limits.max_position_m ||
+        fabsf(candidate.error[1])>config.limits.max_yaw_rad) return false;
+    status=(LqrStatus){.mode=LQR_RUNNING,.event_timestamp_us=now};
+    sample.valid=false;
+    last_state_sequence=s->sequence;
+    last_control_us=now; last_sample_us=s->timestamp_us;
+    // 首次输出等待下一份完整状态，不发布启动校验的候选结果。
     return true;
 }
-void LqrApp_Stop(uint32_t now)
-{
-    status.mode=LQR_DISABLED; status.faults=0; status.data_valid=false;
-    MotorApp_Stop(now); status.duty[0]=status.duty[1]=0;
-    status.event_timestamp_us=now;
+void LqrApp_Stop(uint32_t now){
+    status.mode=LQR_DISABLED; status.faults=0; status.event_timestamp_us=now;
+    sample.valid=false;
+    MotorApp_Stop(now);
 }
-void LqrApp_Poll(uint32_t now)
-{
-    if (status.mode!=LQR_HOLD) return;
-    if (!fresh(StatusStateApp_GetState(),now)) fault(LQR_BAD_STATE,now);
-    else if ((uint32_t)(now-last_control_us)>max_period_us) fault(LQR_TIMING,now);
-    else if (MotorApp_GetStatus()->mode==MOTOR_FAULT ||
-             (status.updates && MotorApp_GetStatus()->mode!=MOTOR_DUTY)) fault(LQR_OUTPUT,now);
-}
-void LqrApp_Update(uint32_t now)
-{
-    LqrApp_Poll(now);
-    if (status.mode!=LQR_HOLD) return;
-    const StatusState *s=StatusStateApp_GetState();
-    if (s->sequence==status.state_sequence) return;
+static void LqrApp_Update(uint32_t now,const StatusState *s){
     uint32_t dt=s->timestamp_us-last_sample_us;
     if (dt<min_period_us || dt>max_period_us) { fault(LQR_TIMING,now); return; }
-    const MotorAppStatus *m=MotorApp_GetStatus();
+
+
+    const MotorAppSample *m=MotorApp_GetSample();
     float rpm[2]={m->left.rpm,m->right.rpm};
-    if (!m->valid || !m->left.feedback_valid || !m->right.feedback_valid ||
-        s->motor.sequence!=m->sequence || !LqrApp_Calculate(s,status.hold,rpm,&config,&tuning,&status)) {
+    const TrajectorySample *reference=TrajectoryApp_GetSample();
+    LqrSample next={0};
+    if (!matching_motor(s,m) || !LqrApp_Calculate(s,&reference->data,rpm,&config,&tuning,&next.data)) {
         fault(LQR_BAD_STATE,now); return;
     }
-    if (fabsf(status.error[0])>config.limits.max_position_m ||
-        fabsf(status.error[1])>config.limits.max_yaw_rad || fabsf(status.error[2])>config.limits.stop_angle_rad) {
+    if (fabsf(next.data.error[0])>config.limits.max_position_m ||
+        fabsf(next.data.error[1])>config.limits.max_yaw_rad || fabsf(next.data.error[2])>config.limits.stop_angle_rad) {
         fault(LQR_RANGE,now); return;
     }
-    status.dt_us=dt; status.timestamp_us=now; status.data_age_us=now-s->motion.timestamp_us;
-    status.state_sequence=s->sequence;
-    last_sample_us=s->timestamp_us;
-    if (!MotorApp_ApplyDuty(status.duty[0],status.duty[1],now)) { fault(LQR_OUTPUT,now); return; }
-    last_control_us=now; ++status.updates; status.data_valid=true;
-    ++status.sequence;
-    status.input_timestamp_us=s->timestamp_us;
-    status.relative_rpm[0]=rpm[0]; status.relative_rpm[1]=rpm[1];
-    status.pitch_rate_scale=tuning.pitch_rate_scale;
-    status.yaw_rate_scale=tuning.yaw_rate_scale;
+    // 在执行前保存输入身份：输出失败可能同步触发停机补采样，改变上游数据。
+    next.timestamp_us=now; next.sequence=sample.sequence+1;
+    next.state_source=(SampleSource){s->timestamp_us,s->sequence};
+    next.motor_source=(SampleSource){m->timestamp_us,m->sequence};
+    next.dt_us=dt; next.data_age_us=now-s->motion.timestamp_us;
+    next.reference=reference->data; next.tuning=tuning;
+    next.reference_source=(SampleSource){reference->timestamp_us,reference->sequence};
+    next.relative_rpm[0]=rpm[0]; next.relative_rpm[1]=rpm[1];
+    
+    if (!MotorApp_ApplyDuty(next.data.duty[0],next.data.duty[1],now)) { fault(LQR_OUTPUT,now); return; }
+    next.valid=true;
+    sample=next;
+    last_sample_us=next.state_source.timestamp_us;
+    last_state_sequence=next.state_source.sequence;
+    last_control_us=now;
+    status.has_output=true;
 }
-bool LqrApp_IsActive(void) { return status.mode==LQR_HOLD; }
+void LqrApp_Poll(uint32_t now){
+    if (!initialized || status.mode!=LQR_RUNNING) return;
+    const StatusState *s=StatusStateApp_GetState();
+    if (!fresh(s,now)) { fault(LQR_BAD_STATE,now); return; }
+    if ((uint32_t)(now-last_control_us)>max_period_us) { fault(LQR_TIMING,now); return; }
+    if (MotorApp_GetStatus()->mode==MOTOR_FAULT ||
+        (status.has_output && MotorApp_GetStatus()->mode!=MOTOR_DUTY)) { fault(LQR_OUTPUT,now); return; }
+    if (!reference_valid(TrajectoryApp_GetSample(),now)) { fault(LQR_BAD_REFERENCE,now); return; }
+    if (s->sequence!=last_state_sequence) LqrApp_Update(now,s);
+}
+bool LqrApp_IsActive(void) { return status.mode==LQR_RUNNING; }
 const LqrStatus *LqrApp_GetStatus(void) { return &status; }
+const LqrSample *LqrApp_GetSample(void) { return &sample; }

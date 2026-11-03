@@ -37,7 +37,7 @@ typedef struct {
 } StatusStateAppStatus;
 
 /* Init 在 MotionApp/MotorApp 初始化后调用，独占同步电机反馈回调。
- * 电机采样由调度层负责；本模块不调用 MotorApp_Update。
+ * 电机采样由调度层负责；由 MotorApp_Poll 接收采样请求。
  * 每帧反馈（包括停机补采样）同步进入 Poll，避免漏掉位移增量。
  * 主循环也应持续调用 Poll，检查失效；无新输入不重复计算。
  * 所有入口在主循环上下文使用，不支持中断调用或并发访问。

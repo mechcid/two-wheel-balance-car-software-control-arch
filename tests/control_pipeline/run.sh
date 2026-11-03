@@ -22,5 +22,5 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined \
   tests/control_pipeline/test.c module/pose_estimate/src/sensor_app.c \
   module/pose_estimate/src/motion_app.c module/pose_estimate/src/motion_estimator.c \
   module/overlay_app/src/status_state_app.c module/pose_estimate/src/odometry_app.c \
-  module/overlay_app/src/lqr_app.c -lm -o "$test_dir/test"
+  module/overlay_app/src/trajectory_app.c module/overlay_app/src/lqr_app.c -lm -o "$test_dir/test"
 for delay in 13000 10000 11000 12000 14000; do "$test_dir/test" "$delay"; done

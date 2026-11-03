@@ -23,20 +23,43 @@ typedef struct {
     MotorConfig right;
     void (*set_driver_enabled)(bool enabled);
 } MotorAppConfig;
+/* 单轮测量快照；计数器读数为硬件原值，delta_count 已应用方向配置。 */
+typedef struct {
+    uint16_t encoder_count, previous_encoder_count;
+    int32_t delta_count;
+    int64_t total_counts;
+    float rpm, velocity_mps, delta_displacement_m;
+    bool total_counts_valid, delta_valid, feedback_valid;
+} MotorFeedback;
+typedef struct {
+    MotorFeedback left, right;
+    uint32_t timestamp_us, sequence, interval_us;
+    bool valid;
+    /* 与上一成功样本之间存在采样缺失；失败时置位，首份恢复样本携带此标记。 */
+    bool discontinuity;
+} MotorAppSample;
+enum {
+    MOTOR_LEFT_FEEDBACK_FAILED=1u<<0,
+    MOTOR_RIGHT_FEEDBACK_FAILED=1u<<1,
+    MOTOR_LEFT_OUTPUT_FAILED=1u<<2,
+    MOTOR_RIGHT_OUTPUT_FAILED=1u<<3,
+    MOTOR_COMMAND_TIMEOUT=1u<<4,
+    MOTOR_SAMPLE_INTERVAL_INVALID=1u<<5,
+    MOTOR_CONFIG_INVALID=1u<<6,
+    MOTOR_LEFT_INIT_FAILED=1u<<7,
+    MOTOR_RIGHT_INIT_FAILED=1u<<8
+};
 typedef struct {
     MotorAppMode mode;
-    MotorState left;
-    MotorState right;
-    uint32_t timestamp_us, faults;
-    uint32_t sequence;    /* 每次双轮采样发布递增（含无效帧），自然回绕。初始化不发布。 */
-    uint32_t interval_us; /* 本次与上次采样的间隔；timestamp_us 是区间末端。 */
-    bool valid;          /* 两轮增量同区间有效；不表示未被消费者处理。 */
+    uint32_t faults; /* 原因位掩码；故障保留至显式 Stop 恢复或下一次正常采样。 */
+    float left_applied_duty, right_applied_duty;
 } MotorAppStatus;
 
-/* 所有时间参数来自 Timebase_NowUs；主循环每 5 ms 更新一次。
- * SetDuty 参数与状态 applied_duty 均为 -1..1 占空比，rpm 仅为实测反馈。 */
+/* 时间由调用者传入，使用同一 uint32_t 微秒基准。
+ * 每轮 Poll 检查保护；仅 sample_requested=true 时进行常规采样。
+ * 调度层在匹配的新姿态到来时请求采样，不建立独立电机采样相位。 */
 bool MotorApp_Init(const MotorAppConfig *config, uint32_t now_us);
-void MotorApp_Update(uint32_t now_us);
+void MotorApp_Poll(uint32_t now_us, bool sample_requested);
 bool MotorApp_SetDuty(float left, float right, uint32_t now_us);
 /* Closed-loop output: apply immediately without resampling encoders. Main loop only. */
 bool MotorApp_ApplyDuty(float left, float right, uint32_t now_us);
@@ -44,12 +67,12 @@ void MotorApp_Stop(uint32_t now_us);
 void MotorApp_KeepAlive(uint32_t now_us);
 bool MotorApp_IsActive(void);
 const MotorAppStatus *MotorApp_GetStatus(void);
-/* 主循环同步通知，包括启停补采样和无效帧；初始化前也可注册，NULL 取消。
- * 回调必须短小，不得调用 MotorApp 的更新/控制接口或保留指针作历史数据。
- * 里程计在此消费每一帧；GetStatus 仅保留最新帧，低频轮询会漏帧。
- * 消费者各自保存 sequence，重复帧跳过，跳号/valid=false 标记连续性丢失。
- * 读取不会清除 valid；控制状态变化本身不产生新采样序号。 */
-typedef void (*MotorAppFeedbackCallback)(const MotorAppStatus *sample);
+const MotorAppSample *MotorApp_GetSample(void);
+/* 主循环同步通知，包含停机补采样及失败通知；禁止回调重入更新/控制接口。
+ * 成功才推进样本序号，失败保留数值与时间、置 valid=false 并通知。
+ * 消费者先处理无效/不连续，再按成功序号去重；不可保留指针作为历史副本。
+ * GetSample 仅保留最新样本，积分消费者必须接收每次通知。 */
+typedef void (*MotorAppFeedbackCallback)(const MotorAppSample *sample);
 void MotorApp_SetFeedbackCallback(MotorAppFeedbackCallback callback);
 #ifdef __cplusplus
 }

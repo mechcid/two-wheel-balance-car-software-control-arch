@@ -14,22 +14,25 @@ static ImuSample imu;
 static SensorStatus imu_health;
 const ImuSample *SensorApp_GetSample(void) { return &imu; }
 const SensorStatus *SensorApp_GetStatus(void) { return &imu_health; }
-static void update(uint32_t now) { LqrApp_Update(now); DebugApp_Poll(now); }
-static void poll(uint32_t now) { LqrApp_Poll(now); DebugApp_Poll(now); }
+static void update(uint32_t now) { TrajectoryApp_Poll(now); LqrApp_Poll(now); DebugApp_Poll(now); }
+static void poll(uint32_t now) { TrajectoryApp_Poll(now); LqrApp_Poll(now); DebugApp_Poll(now); }
 static StatusState state;
-static MotorAppStatus motor;
+static MotorAppSample motor;
+static MotorAppStatus motor_status;
 static bool reject_output;
 static unsigned writes, stops;
 const StatusState *StatusStateApp_GetState(void) { return &state; }
-const MotorAppStatus *MotorApp_GetStatus(void) { return &motor; }
-void MotorApp_Stop(uint32_t now) { (void)now; ++stops; motor.mode=MOTOR_STOPPED; }
+const MotorAppStatus *MotorApp_GetStatus(void) { return &motor_status; }
+const MotorAppSample *MotorApp_GetSample(void) { return &motor; }
+void MotorApp_Stop(uint32_t now) { (void)now; ++stops; motor_status.mode=MOTOR_STOPPED; }
 bool MotorApp_ApplyDuty(float l, float r, uint32_t now) {
     (void)now; assert(isfinite(l)&&isfinite(r));
     if (reject_output) return false;
-    ++writes; motor.mode=MOTOR_DUTY; return true;
+    ++writes; motor_status.mode=MOTOR_DUTY; return true;
 }
 static void frame(uint32_t now) {
     state.timestamp_us=state.motion.timestamp_us=now; ++state.sequence;
+    state.motor.timestamp_us=motor.timestamp_us=now;
     state.motor.sequence=++motor.sequence; state.valid=true;
     motor.valid=motor.left.feedback_valid=motor.right.feedback_valid=true;
 }
@@ -53,79 +56,82 @@ int main(int argc, char **argv) {
         puts("PASS: IMU polling adapter retains sample identity and freezes on invalid data");return 0;
     }
 
-    LqrConfig c=LqrApp_DefaultConfig(); LqrTuning tuning={.pitch_rate_scale=1,.yaw_rate_scale=1}; LqrStatus out={0};
-    float hold[3]={0}, rpm[2]={0}; state.valid=true;
-    assert(LqrApp_Calculate(&state,hold,rpm,&c,&tuning,&out));
+    LqrConfig c=LqrApp_DefaultConfig(); LqrTuning tuning={.pitch_rate_scale=1,.yaw_rate_scale=1}; LqrResult out={0};
+    TrajectoryPoint hold={0}; float rpm[2]={0}; state.valid=true;
+    assert(LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&out));
     near(out.requested_nm[0],0); near(out.duty[1],0);
     state.theta_dot_radps=1;
-    assert(LqrApp_Calculate(&state,hold,rpm,&c,&tuning,&out)); float baseline=out.requested_nm[0];
-    tuning.pitch_rate_scale=.7f; assert(LqrApp_Calculate(&state,hold,rpm,&c,&tuning,&out));
+    assert(LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&out)); float baseline=out.requested_nm[0];
+    tuning.pitch_rate_scale=.7f; assert(LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&out));
     near(out.requested_nm[0],baseline*.7f); tuning.pitch_rate_scale=1; state.theta_dot_radps=0;
     LqrTuning defaults=LqrApp_DefaultTuning();
     near(defaults.pitch_rate_scale,.5f); near(defaults.yaw_rate_scale,.5f);
     // Only the yaw-rate contribution changes, even with other state terms present.
     state.psi_rad=.02f;state.theta_rad=.01f;state.theta_dot_radps=.2f;state.psi_dot_radps=.8f;
-    LqrStatus full, half;
-    assert(LqrApp_Calculate(&state,hold,rpm,&c,&tuning,&full));
+    LqrResult full, half;
+    assert(LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&full));
     tuning.yaw_rate_scale=.5f;
-    assert(LqrApp_Calculate(&state,hold,rpm,&c,&tuning,&half));
+    assert(LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&half));
     for (unsigned wheel=0;wheel<2;++wheel)
         near(half.requested_nm[wheel]-full.requested_nm[wheel],lqr_k[wheel][4]*.8f*.5f);
     assert(memcmp(full.error,half.error,sizeof full.error)==0);
-    tuning.yaw_rate_scale=NAN;assert(!LqrApp_Calculate(&state,hold,rpm,&c,&tuning,&out));
-    tuning.yaw_rate_scale=.49f;assert(!LqrApp_Calculate(&state,hold,rpm,&c,&tuning,&out));
-    tuning.yaw_rate_scale=1.01f;assert(!LqrApp_Calculate(&state,hold,rpm,&c,&tuning,&out));
+    tuning.yaw_rate_scale=NAN;assert(!LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&out));
+    tuning.yaw_rate_scale=.49f;assert(!LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&out));
+    tuning.yaw_rate_scale=1.01f;assert(!LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&out));
     tuning.yaw_rate_scale=1;state=(StatusState){.valid=true};
     state.theta_rad=.03f;
-    assert(LqrApp_Calculate(&state,hold,rpm,&c,&tuning,&out));
+    assert(LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&out));
     assert(out.requested_nm[0]>0 && out.requested_nm[1]>0);
     near(out.requested_nm[0],-lqr_k[0][2]*.03f); /* 当前用户选择的 K，不能锁死历史增益。 */
     // Rotation by pi/2: world Y displacement is forward, X is lateral.
     state=(StatusState){.valid=true,.x_m=8,.y_m=3,.psi_rad=1.5707963268f,.v_mps=.2f};
-    hold[0]=7; hold[1]=2; hold[2]=1.5707963268f;
-    assert(LqrApp_Calculate(&state,hold,rpm,&c,&tuning,&out));
+    hold.x_m=7; hold.y_m=2; hold.psi_rad=1.5707963268f;
+    assert(LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&out));
     near(out.error[0],1); near(out.error[3],.2f);
-    state.psi_rad=3.13159265f; hold[2]=-3.13159265f;
-    assert(LqrApp_Calculate(&state,hold,rpm,&c,&tuning,&out)); near(out.error[1],-.02f);
-    state=(StatusState){.valid=true}; hold[0]=hold[1]=hold[2]=0;
+    state.psi_rad=3.13159265f; hold.psi_rad=-3.13159265f;
+    assert(LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&out)); near(out.error[1],-.02f);
+    state=(StatusState){.valid=true}; hold.x_m=hold.y_m=hold.psi_rad=0;
     rpm[0]=60; rpm[1]=-60;
-    assert(LqrApp_Calculate(&state,hold,rpm,&c,&tuning,&out));
+    assert(LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&out));
     near(out.duty[0],.01139f*6.283185307f/(.03677f*12));
     near(out.estimated_nm[0],0); near(out.duty[1],-out.duty[0]);
     state.theta_rad=10;
-    assert(LqrApp_Calculate(&state,hold,rpm,&c,&tuning,&out));
+    assert(LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&out));
     assert(out.saturated); near(out.duty[0],.4f);
     state.theta_rad=NAN;
-    assert(!LqrApp_Calculate(&state,hold,rpm,&c,&tuning,&out));
+    assert(!LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&out));
     state.theta_rad=0; rpm[0]=INFINITY;
-    assert(!LqrApp_Calculate(&state,hold,rpm,&c,&tuning,&out));
+    assert(!LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&out));
     LqrConfig bad=c; bad.actuator.battery_v=0; assert(!LqrApp_Init(&bad,&tuning));
-    assert(LqrApp_Init(&c,&tuning)); assert(!LqrApp_Init(&c,&tuning));
+    assert(TrajectoryApp_Init()); assert(LqrApp_Init(&c,&tuning)); assert(!LqrApp_Init(&c,&tuning));
     assert(!LqrApp_IsActive() && writes==0);
     uint32_t now=UINT32_MAX-6000U;
     state=(StatusState){0}; frame(now);
-    assert(LqrApp_Start(now)); assert(writes==0);
-    assert(!LqrApp_Start(now));
+    assert(DebugApp_StartHold(now)); assert(writes==0);
+    assert(!DebugApp_StartHold(now));
     now+=5000; frame(now); state.theta_rad=.01f; update(now);
     assert(writes==1 && LqrApp_IsActive());
     update(now); assert(writes==1); // Never process a duplicate twice.
     now+=5000; frame(now); update(now); assert(writes==2); // Clock wrap.
     state.valid=false; poll(now);
     assert(stops==1 && LqrApp_GetStatus()->mode==LQR_FAULT);
-    frame(now); assert(!LqrApp_Start(now)); // Explicit stop required to clear latch.
-    DebugApp_Stop(now); frame(now); assert(LqrApp_Start(now));
+    frame(now); assert(!DebugApp_StartHold(now)); // Explicit stop required to clear latch.
+    DebugApp_Stop(now); frame(now); assert(DebugApp_StartHold(now));
     now+=8000; frame(now); update(now);
     assert(LqrApp_GetStatus()->faults & LQR_TIMING);
-    DebugApp_Stop(now); frame(now); assert(LqrApp_Start(now));
+    DebugApp_Stop(now); frame(now); assert(DebugApp_StartHold(now));
     now+=5000; frame(now); state.theta_rad=.4f; update(now);
     assert(LqrApp_GetStatus()->faults & LQR_RANGE);
-    DebugApp_Stop(now); state.theta_rad=0; frame(now); assert(LqrApp_Start(now));
+    DebugApp_Stop(now); state.theta_rad=0; frame(now); assert(DebugApp_StartHold(now));
+    LqrSample saved=*LqrApp_GetSample();
     now+=5000; frame(now); reject_output=true; update(now);
     assert(LqrApp_GetStatus()->faults & LQR_OUTPUT);
-    DebugApp_Stop(now); reject_output=false; frame(now); assert(LqrApp_Start(now));
+    saved.valid=false;
+    assert(memcmp(&saved,LqrApp_GetSample(),sizeof saved)==0);
+    DebugApp_Stop(now); reject_output=false; frame(now); assert(DebugApp_StartHold(now));
     now+=5000; frame(now); state.motion.timestamp_us=now-7501; update(now);
     assert(LqrApp_GetStatus()->faults & LQR_BAD_STATE);
-    DebugApp_Stop(now); frame(now); state.theta_rad=.11f; assert(!LqrApp_Start(now));
+    DebugApp_Stop(now); frame(now); state.theta_rad=.11f; assert(!DebugApp_StartHold(now));
     state.theta_rad=0; frame(now); assert(DebugApp_StartTrial(now,false));
     for (unsigned i=0;i<1399;++i) {
         now+=5000; frame(now); update(now);
@@ -133,10 +139,10 @@ int main(int argc, char **argv) {
     }
     poll(now+4999); assert(LqrApp_IsActive()); // 6.999999 seconds.
     now+=5000; frame(now); update(now); // Exactly 7 seconds: stop and freeze.
-    assert(!LqrApp_IsActive() && motor.mode==MOTOR_STOPPED);
+    assert(!LqrApp_IsActive() && motor_status.mode==MOTOR_STOPPED);
     const volatile TraceStatus *ts=TraceApp_GetStatus(trace);
     assert(ts->mode==TRACE_FROZEN && ts->freeze_reason==TRACE_FREEZE_STOP);
-    assert(ts->count==LQR_TRACE_CAPACITY && !LqrApp_GetStatus()->data_valid);
+    assert(ts->count==LQR_TRACE_CAPACITY && !LqrApp_GetSample()->valid);
     LqrTraceFrame f, previous; assert(TraceApp_Read(trace,0,&previous,sizeof previous));
     for (unsigned i=1;i<ts->count-1;++i) {
         assert(TraceApp_Read(trace,i,&f,sizeof f)); assert(f.header.valid && f.header.event==TRACE_SAMPLE);
@@ -144,7 +150,7 @@ int main(int argc, char **argv) {
     }
     assert(TraceApp_Read(trace,ts->count-1,&f,sizeof f) && !f.header.valid && f.header.event==TRACE_STOP_EVENT);
     uint32_t session=ts->session, total=ts->total_written;
-    frame(now); assert(LqrApp_Start(now)); now+=5000; frame(now); update(now);
+    frame(now); assert(DebugApp_StartHold(now)); now+=5000; frame(now); update(now);
     assert(ts->session==session && ts->total_written==total); // No implicit restart.
     DebugApp_Stop(now);
     frame(now); assert(DebugApp_StartTrial(now,false));
@@ -154,10 +160,10 @@ int main(int argc, char **argv) {
     LqrTracePayload zero={0}; assert(memcmp(&f.data,&zero,sizeof zero)==0);
     DebugApp_Stop(now); frame(now); state.theta_dot_radps=.1f;
     assert(DebugApp_StartTrial(now,true)); now+=5000; frame(now); update(now);
-    float soft=LqrApp_GetStatus()->requested_nm[0];
+    float soft=LqrApp_GetSample()->data.requested_nm[0];
     DebugApp_Stop(now); frame(now); assert(DebugApp_StartTrial(now,false));
     now+=5000; frame(now); update(now);
-    near(soft,LqrApp_GetStatus()->requested_nm[0]*.7f);
+    near(soft,LqrApp_GetSample()->data.requested_nm[0]*.7f);
     DebugApp_Stop(now);
     tuning.pitch_rate_scale=.5f; tuning.yaw_rate_scale=.5f; assert(LqrApp_SetTuning(&tuning));
     frame(now); assert(DebugApp_StartTrial(now,true));
@@ -166,11 +172,11 @@ int main(int argc, char **argv) {
     near(LqrApp_GetTuning().pitch_rate_scale,.5f);
     near(LqrApp_GetTuning().yaw_rate_scale,.5f);
     DebugApp_Stop(now); frame(now);
-    assert(TraceApp_Arm(trace)); assert(LqrApp_Start(now));
+    assert(TraceApp_Arm(trace)); assert(DebugApp_StartHold(now));
     TraceApp_Poll(trace,now);assert(TraceApp_GetStatus(trace)->mode==TRACE_ARMED);
     now+=5000;frame(now);motor.left.rpm=12;motor.right.rpm=34;
-    LqrApp_Update(now);uint32_t output_time=LqrApp_GetStatus()->timestamp_us;
-    uint32_t output_seq=LqrApp_GetStatus()->sequence;
+    TrajectoryApp_Poll(now); LqrApp_Poll(now);uint32_t output_time=LqrApp_GetSample()->timestamp_us;
+    uint32_t output_seq=LqrApp_GetSample()->sequence;
     motor.left.rpm=99;motor.right.rpm=99;
     TraceApp_Poll(trace,now+100);DebugApp_Stop(now+200);
     assert(TraceApp_Read(trace,0,&f,sizeof f) && f.header.timestamp_us==output_time && f.header.sequence==output_seq);
@@ -194,6 +200,73 @@ int main(int argc, char **argv) {
     ImuTraceFrame imuf; assert(ImuTrace_Read(&imu_trace,1,&imuf));
     assert(imuf.header.sequence==2 && imuf.data.gyro[2]==6);
     assert(LqrTrace_Read(&lqr_trace,0,&f));
+    // 成功输出完整保存两个输入来源；停止、重启和候选失败不改写历史样本。
+    frame(now+500); assert(DebugApp_StartHold(now+500));
+    now+=5500; frame(now); update(now);
+    assert(LqrApp_GetSample()->valid);
+    assert(LqrApp_GetSample()->state_source.sequence==state.sequence);
+    assert(LqrApp_GetSample()->state_source.timestamp_us==state.timestamp_us);
+    assert(LqrApp_GetSample()->motor_source.sequence==motor.sequence);
+    assert(LqrApp_GetSample()->motor_source.timestamp_us==motor.timestamp_us);
+    saved=*LqrApp_GetSample(); saved.valid=false;
+    LqrApp_Stop(now);
+    assert(memcmp(&saved,LqrApp_GetSample(),sizeof saved)==0);
+    frame(now); assert(DebugApp_StartHold(now));
+    assert(!LqrApp_GetStatus()->has_output);
+    assert(memcmp(&saved,LqrApp_GetSample(),sizeof saved)==0);
+    now+=5000; frame(now);
+    // 序号相同但时间不同，不能拼成同一帧。
+    ++motor.timestamp_us;
+    LqrApp_Poll(now);
+    assert(LqrApp_GetStatus()->faults & LQR_BAD_STATE);
+    assert(memcmp(&saved,LqrApp_GetSample(),sizeof saved)==0);
+    LqrApp_Stop(now); frame(now); assert(DebugApp_StartHold(now));
+    now+=5000; frame(now); ++motor.sequence;
+    LqrApp_Poll(now);
+    assert(LqrApp_GetStatus()->faults & LQR_BAD_STATE);
+    assert(memcmp(&saved,LqrApp_GetSample(),sizeof saved)==0);
+    // 纯计算失败也不覆盖调用者的结果。
+    LqrResult before=out; state.valid=false;
+    assert(!LqrApp_Calculate(&state,&hold,rpm,&c,&tuning,&out));
+    assert(memcmp(&before,&out,sizeof out)==0);
+    // LQR 直接消费外部参考：不生成目标，不把参考覆盖为当前位置。
+    LqrApp_Stop(now); TrajectoryApp_Stop();
+    state=(StatusState){0}; frame(now);
+    assert(!LqrApp_Start(now)); // 没有参考，拒绝启动。
+    StatusState origin=state; origin.x_m=0.02f;
+    assert(TrajectoryApp_Hold(&origin,now));
+    TrajectorySample reference=*TrajectoryApp_GetSample();
+    assert(!TrajectoryApp_Hold(&state,now)); // 活动任务不允许直接替换。
+    assert(memcmp(&reference,TrajectoryApp_GetSample(),sizeof reference)==0);
+    assert(LqrApp_Start(now));
+    now+=5000; frame(now); LqrApp_Poll(now); // 不轮询轨迹，验证参考可被独立消费。
+    assert(LqrApp_GetSample()->valid);
+    near(LqrApp_GetSample()->reference.x_m,0.02f);
+    near(LqrApp_GetSample()->data.error[0],-0.02f);
+    assert(LqrApp_GetSample()->reference_source.sequence==reference.sequence);
+    assert(LqrApp_GetSample()->reference_source.timestamp_us==reference.timestamp_us);
+    assert(TrajectoryApp_GetSample()->origin_source.sequence==origin.sequence);
+    saved=*LqrApp_GetSample(); saved.valid=false;
+    now+=3000; frame(now); LqrApp_Poll(now);
+    assert(LqrApp_GetStatus()->faults & LQR_BAD_REFERENCE);
+    assert(memcmp(&saved,LqrApp_GetSample(),sizeof saved)==0);
+    LqrApp_Stop(now); TrajectoryApp_Stop();
+    assert(!LqrApp_Start(now));
+    origin=state; origin.x_m=NAN;
+    assert(!TrajectoryApp_Hold(&origin,now));
+    origin=state; origin.timestamp_us=now-TRAJECTORY_VALID_FOR_US-1;
+    assert(!TrajectoryApp_Hold(&origin,now));
+    assert(TrajectoryApp_Hold(&state,now));
+    reference=*TrajectoryApp_GetSample();
+    TrajectoryApp_Poll(now+TRAJECTORY_UPDATE_PERIOD_US-1);
+    assert(TrajectoryApp_GetSample()->sequence==reference.sequence);
+    TrajectoryApp_Poll(now+TRAJECTORY_UPDATE_PERIOD_US);
+    assert(TrajectoryApp_GetSample()->sequence==reference.sequence+1);
+    near(TrajectoryApp_GetSample()->data.x_m,reference.data.x_m);
+    assert(TrajectoryApp_GetSample()->origin_source.sequence==reference.origin_source.sequence);
+    TrajectoryApp_Stop();
+    assert(!TrajectoryApp_GetSample()->valid);
+    puts("PASS: external hold reference, provenance, publication gate, invalid/expired reference protection");
     puts("PASS: LQR/IMU typed instances record together and freeze independently");
     puts("PASS: LQR projection/wrap/sign/units/saturation, clock wrap, duplicates, explicit start, fault latch, timing/stale/range/output failures");
 }

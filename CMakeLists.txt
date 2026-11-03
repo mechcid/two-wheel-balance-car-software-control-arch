@@ -53,6 +53,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     module/base/src/timebase.c
     module/base/src/TIM_IT.c
+    module/overlay_app/src/trajectory_app.c
     module/overlay_app/src/lqr_app.c
     module/overlay_app/src/status_state_app.c
     module/base/src/mpu6050.c

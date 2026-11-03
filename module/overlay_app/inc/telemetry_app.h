@@ -10,7 +10,7 @@ void TelemetryApp_Poll(void);
  * 左右测速有效性、左右位移有效性。手动查询命令不受 stream 控制。 */
 void TelemetryApp_ReportImu(const ImuSample *sample, bool available);
 void TelemetryApp_ReportAttitude(bool available);
-void TelemetryApp_ReportMotor(const MotorAppStatus *status);
+void TelemetryApp_ReportMotor(const MotorAppSample *sample);
 /* STATE：时间_us、序号、valid、faults、x_mm、y_mm、theta_mrad、psi_mrad、
  * v_mmps、theta_dot_mradps、psi_dot_mradps；无效帧也输出供诊断。 */
 void TelemetryApp_ReportState(const StatusState *state);

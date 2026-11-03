@@ -10,7 +10,8 @@
 
 static uint32_t now_us;
 uint32_t Timebase_NowUs(void) { return now_us; }
-static MotorAppStatus motor;
+static MotorAppSample motor;
+static MotorAppStatus motor_status;
 static MotorAppFeedbackCallback feedback;
 static unsigned output_count;
 HAL_StatusTypeDef MPU6050_Init(MPU6050 *d,I2C_HandleTypeDef *bus) {
@@ -23,17 +24,19 @@ HAL_StatusTypeDef MPU6050_DataReady(MPU6050 *d) { (void)d; return HAL_OK; }
 HAL_StatusTypeDef MPU6050_Read(MPU6050 *d,MPU6050_Sample *s) {
     (void)d; *s=(MPU6050_Sample){.az=16384}; now_us+=1600; return HAL_OK;
 }
-const MotorAppStatus *MotorApp_GetStatus(void) { return &motor; }
+const MotorAppStatus *MotorApp_GetStatus(void) { return &motor_status; }
+const MotorAppSample *MotorApp_GetSample(void) { return &motor; }
 void MotorApp_SetFeedbackCallback(MotorAppFeedbackCallback cb) { feedback=cb; }
-void MotorApp_Update(uint32_t now) {
+void MotorApp_Poll(uint32_t now, bool requested) {
+    if (!requested) return;
     motor.interval_us=now-motor.timestamp_us; motor.timestamp_us=now;
     ++motor.sequence; motor.valid=true;
     motor.left.feedback_valid=motor.right.feedback_valid=true;
     feedback(&motor);
 }
-void MotorApp_Stop(uint32_t now) { (void)now; motor.mode=MOTOR_STOPPED; }
+void MotorApp_Stop(uint32_t now) { (void)now; motor_status.mode=MOTOR_STOPPED; }
 bool MotorApp_ApplyDuty(float l,float r,uint32_t now) {
-    (void)l; (void)r; (void)now; ++output_count; motor.mode=MOTOR_DUTY; return true;
+    (void)l; (void)r; (void)now; ++output_count; motor_status.mode=MOTOR_DUTY; return true;
 }
 /* 从 main.c 提取真实的采集、姿态、状态与控制执行段，防止测试复制旧调度。 */
 #include "pipeline.h"
@@ -46,6 +49,7 @@ int main(int argc,char **argv) {
     assert(MotionApp_Init(&motion,Timebase_NowUs));
     assert(StatusStateApp_Init(.0325f,.0325f));
     LqrConfig config=LqrApp_DefaultConfig(); LqrTuning tuning=LqrApp_DefaultTuning();
+    assert(TrajectoryApp_Init());
     assert(LqrApp_Init(&config,&tuning));
     motor.timestamp_us=now_us;
     pipeline_init();
@@ -54,6 +58,7 @@ int main(int argc,char **argv) {
         pipeline_iteration();
         /* 启动命令由用户在初始化结束后发送，先等待启动阶段的采样节奏稳定。 */
         if (!armed && StatusStateApp_GetState()->valid && StatusStateApp_GetState()->sequence>=3) {
+            assert(TrajectoryApp_Hold(StatusStateApp_GetState(),now_us));
             assert(LqrApp_Start(now_us)); armed=true;
         }
         if (armed && !LqrApp_IsActive()) {

@@ -29,14 +29,15 @@ static long milli(float value)
 
 static float motor_left, motor_right;
 static void motor_status(void){
-    const MotorAppStatus *m=MotorApp_GetStatus();
+    const MotorAppSample *m=MotorApp_GetSample();
+    const MotorAppStatus *health=MotorApp_GetStatus();
     static const char *names[]={"STOPPED","DUTY","FAULT","UNCONFIGURED"};
-    const char *name=(unsigned)m->mode<4 ? names[m->mode] : "INVALID";
-    UART_Printf("MOTOR mode=%s us=%lu faults=%lu\r\n", name,
-        (unsigned long)m->timestamp_us,(unsigned long)m->faults);
+    const char *name=(unsigned)health->mode<4 ? names[health->mode] : "INVALID";
+    UART_Printf("MOTOR mode=%s us=%lu faults=0x%lX\r\n", name,
+        (unsigned long)m->timestamp_us,(unsigned long)health->faults);
     UART_Printf("WHEEL L=%ld R=%ld mrpm dutyL=%ld dutyR=%ld permille valid=%u,%u\r\n",
         (long)(m->left.rpm*1000),(long)(m->right.rpm*1000),
-        (long)(m->left.applied_duty*1000),(long)(m->right.applied_duty*1000),m->left.feedback_valid,m->right.feedback_valid);
+        (long)(health->left_applied_duty*1000),(long)(health->right_applied_duty*1000),m->left.feedback_valid,m->right.feedback_valid);
     UART_Printf("STEP seq=%lu dt_us=%lu valid=%u L=%ld R=%ld um wheel_valid=%u,%u\r\n",
         (unsigned long)m->sequence,(unsigned long)m->interval_us,m->valid,
         milli(m->left.delta_displacement_m*1000),milli(m->right.delta_displacement_m*1000),
@@ -54,13 +55,14 @@ static void motor_duty(void){
 static void lqr_check(void) {
     uint32_t now=Timebase_NowUs();
     const StatusState *s=StatusStateApp_GetState();
-    const MotorAppStatus *m=MotorApp_GetStatus();
+    const MotorAppSample *m=MotorApp_GetSample();
+    const MotorAppStatus *health=MotorApp_GetStatus();
     const MotionSample *pose=MotionApp_GetSample();
     UART_Printf("LQR CHECK valid=%u faults=0x%lX state_age_us=%lu imu_age_us=%lu theta_mrad=%ld\r\n",
         s->valid,(unsigned long)StatusStateApp_GetStatus()->faults,(unsigned long)(now-s->timestamp_us),
         (unsigned long)(now-s->motion.timestamp_us),milli(s->theta_rad));
     UART_Printf("LQR CHECK motor_mode=%u frame=%u wheels=%u,%u seq_match=%u pose_valid=%u pose_gap=%u\r\n",
-        (unsigned)m->mode,m->valid,m->left.feedback_valid,m->right.feedback_valid,
+        (unsigned)health->mode,m->valid,m->left.feedback_valid,m->right.feedback_valid,
         s->motor.sequence==m->sequence,pose->valid,pose->discontinuity);
 }
 static void lqr_soft_trial(void) {
@@ -74,7 +76,7 @@ static void lqr_trial(void) {
     if (!ok) lqr_check();
 }
 static void lqr_start(void) {
-    bool ok=LqrApp_Start(Timebase_NowUs());
+    bool ok=DebugApp_StartHold(Timebase_NowUs());
     UART_Printf("LQR start %s\r\n",ok ? "OK" : "REJECTED");
     if (!ok) lqr_check();
 }
@@ -104,20 +106,22 @@ static void trace_status(void) {
 }
 static void lqr_status(void) {
     const LqrStatus *s=LqrApp_GetStatus();
+    const LqrSample *sample=LqrApp_GetSample();
+    TrajectoryPoint target=sample->reference;
     LqrTuning tuning=LqrApp_GetTuning();
     UART_Printf("LQR tuning pitch_rate_permille=%ld yaw_rate_permille=%ld\r\n",
         milli(tuning.pitch_rate_scale),milli(tuning.yaw_rate_scale));
-    UART_Printf("LQR mode=%u fault=%lu updates=%lu dt=%lu age=%lu Ts=5000 K=zoh5-v1\r\n",
-        (unsigned)s->mode,(unsigned long)s->faults,(unsigned long)s->updates,
-        (unsigned long)s->dt_us,(unsigned long)s->data_age_us);
+    UART_Printf("LQR mode=%u fault=%lu seq=%lu valid=%u dt=%lu age=%lu Ts=5000 K=zoh5-v1\r\n",
+        (unsigned)s->mode,(unsigned long)s->faults,(unsigned long)sample->sequence,sample->valid,
+        (unsigned long)sample->dt_us,(unsigned long)sample->data_age_us);
     UART_Printf("LQR hold_milli=%ld,%ld,%ld E_milli=%ld,%ld,%ld,%ld,%ld,%ld\r\n",
-        milli(s->hold[0]),milli(s->hold[1]),milli(s->hold[2]),
-        milli(s->error[0]),milli(s->error[1]),milli(s->error[2]),
-        milli(s->error[3]),milli(s->error[4]),milli(s->error[5]));
+        milli(target.x_m),milli(target.y_m),milli(target.psi_rad),
+        milli(sample->data.error[0]),milli(sample->data.error[1]),milli(sample->data.error[2]),
+        milli(sample->data.error[3]),milli(sample->data.error[4]),milli(sample->data.error[5]));
     UART_Printf("LQR req_mNm=%ld,%ld model_mNm=%ld,%ld duty_permille=%ld,%ld sat=%u\r\n",
-        milli(s->requested_nm[0]),milli(s->requested_nm[1]),
-        milli(s->estimated_nm[0]),milli(s->estimated_nm[1]),
-        milli(s->duty[0]),milli(s->duty[1]),s->saturated);
+        milli(sample->data.requested_nm[0]),milli(sample->data.requested_nm[1]),
+        milli(sample->data.estimated_nm[0]),milli(sample->data.estimated_nm[1]),
+        milli(sample->data.duty[0]),milli(sample->data.duty[1]),sample->data.saturated);
 }
 static void motion_status(void)
 {
@@ -233,15 +237,15 @@ void TelemetryApp_ReportAttitude(bool available){
 }
 
 //打印两轮速度和位移数据
-void TelemetryApp_ReportMotor(const MotorAppStatus *motor){
+void TelemetryApp_ReportMotor(const MotorAppSample *motor){
     if (!initialized || !stream || !motor) return;
     /* 停止状态也输出，便于观察手动转轮；无效数值由对应标志指明。 */
     UART_Printf("MOTOR_STEP,%luus,%u, L %ldmrpm, R %ldmrpm, dL %ldum, dR %ldum,%u,%u,%u,%u\r\n",
-        (unsigned long)motor->timestamp_us,(unsigned)motor->mode,
+        (unsigned long)motor->timestamp_us,(unsigned)MotorApp_GetStatus()->mode,
         milli(motor->left.rpm),milli(motor->right.rpm),
         milli(motor->left.delta_displacement_m*1000),milli(motor->right.delta_displacement_m*1000),
-        motor->left.feedback_valid,motor->right.feedback_valid,
-        motor->left.delta_valid,motor->right.delta_valid);
+        motor->valid && motor->left.feedback_valid,motor->valid && motor->right.feedback_valid,
+        motor->valid && motor->left.delta_valid,motor->valid && motor->right.delta_valid);
 }
 
 // 状态向量周期输出，顺序与 LQR 向量一致；物理量统一放大 1000 倍。

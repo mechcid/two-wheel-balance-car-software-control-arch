@@ -2,65 +2,111 @@
 #include "motor.hpp"
 #include <new>
 
-namespace {//匿名命名空间，作用类似于static，花括号内的内容只在当前文件内部可见
+namespace {
+// 静态存储承载硬件所有者；初始化时原位构造，不使用堆分配。
 alignas(Motor) unsigned char left_motor_storage[sizeof(Motor)];
 alignas(Motor) unsigned char right_motor_storage[sizeof(Motor)];
-Motor *left_motor{};
-Motor *right_motor{};
+Motor *left_motor{}, *right_motor{};
+MotorAppConfig config{};
+MotorAppSample sample{};
+MotorAppStatus status{MOTOR_UNCONFIGURED, 0, 0, 0};
 struct MotorCommand {
-    float left_duty;
-    float right_duty;
+    float left_duty, right_duty;
+    uint32_t timestamp_us;
 };
 MotorCommand command{};
-MotorAppConfig config{};
-MotorAppStatus status{MOTOR_UNCONFIGURED, {}, {}, 0, 0, 0, 0, false};
 MotorAppFeedbackCallback feedback_callback{};
-uint32_t last_update, last_command;
-bool initialized;
-constexpr uint32_t command_timeout_us = 1000000;
-constexpr uint32_t max_control_gap_us = 50000;
+uint32_t last_update;
+bool initialized, pending_gap;
+constexpr uint32_t command_timeout_us=1000000;
+constexpr uint32_t max_control_gap_us=50000;
 
-bool stop_motor(Motor &motor, float dt_s){
-    bool stopped = motor.stop();
-    bool rebased = motor.rebaseFeedback(dt_s);
-    return stopped && rebased;
+void sync_output() {
+    status.left_applied_duty=left_motor->state().applied_duty;
+    status.right_applied_duty=right_motor->state().applied_duty;
 }
-
-//用于更新记录两个电机的状态，并且给更新的数据打上时间戳记录，输出到串口
-//本身并不参与电机逻辑上的组织
-void snapshot(uint32_t now)
-{
-    status.left = left_motor->state();
-    status.right = right_motor->state();
-    status.timestamp_us = now;
+MotorFeedback feedback(const MotorState &s, const MotorConfig &c) {
+    MotorFeedback f{};
+    f.encoder_count=c.encoder->now_cnt;
+    f.previous_encoder_count=c.encoder->last_cnt;
+    f.delta_count=c.encoder_reversed ? -int32_t(c.encoder->delta_cnt) : c.encoder->delta_cnt;
+    f.total_counts=s.total_counts;
+    f.rpm=s.rpm; f.velocity_mps=s.velocity_mps;
+    f.delta_displacement_m=s.delta_displacement_m;
+    f.total_counts_valid=s.total_counts_valid;
+    f.delta_valid=s.delta_valid; f.feedback_valid=s.feedback_valid;
+    return f;
 }
-// 每次编码器采集只发布一次；回调在下一份数据覆盖前同步消费。
-void publish(uint32_t now, uint32_t elapsed, bool valid){
-    snapshot(now);
-    status.interval_us = elapsed;
-    status.valid = valid && elapsed > 0 && elapsed <= max_control_gap_us &&
-        status.left.delta_valid && status.right.delta_valid;
-    ++status.sequence;
-    if (feedback_callback) feedback_callback(&status);
+// 发布完整测量；失败也通知下游，但不把旧数值标记为新样本。
+void publish(uint32_t now, uint32_t elapsed, bool feedback_ok) {
+    const auto left=feedback(left_motor->state(),config.left);
+    const auto right=feedback(right_motor->state(),config.right);
+    bool valid=feedback_ok && elapsed>0 && elapsed<=max_control_gap_us &&
+        left.delta_valid && right.delta_valid && left.feedback_valid && right.feedback_valid;
+    if (valid) {
+        sample={left,right,now,sample.sequence+1,elapsed,true,pending_gap};
+        pending_gap=false;
+    } else {
+        sample.valid=false;
+        sample.discontinuity=true;
+        pending_gap=true;
+    }
+    if (feedback_callback) feedback_callback(&sample);
 }
-void stop_and_sample(uint32_t now, bool force_fault)
-{
+uint32_t stop_outputs() {
     config.set_driver_enabled(false);
-    uint32_t elapsed = now - last_update;
-    float dt_s=(elapsed>0 && elapsed<=max_control_gap_us) ? elapsed*0.000001f : 0;
-    bool left_ok = stop_motor(*left_motor, dt_s);
-    bool right_ok = stop_motor(*right_motor, dt_s);
-    command = {};
-    status.mode = (left_ok && right_ok && !force_fault) ? MOTOR_STOPPED : MOTOR_FAULT;
-    if (force_fault) ++status.faults;
-    last_update = now;
-    publish(now, elapsed, true);
+    bool left=left_motor->stop(), right=right_motor->stop();
+    sync_output();
+    command={};
+    return (left ? 0U : uint32_t(MOTOR_LEFT_OUTPUT_FAILED)) |
+           (right ? 0U : uint32_t(MOTOR_RIGHT_OUTPUT_FAILED));
 }
-bool request_valid(float left, float right)
-{
-    return initialized && status.mode != MOTOR_FAULT &&
+void stop_and_sample(uint32_t now, uint32_t reason) {
+    uint32_t elapsed=now-last_update;
+    float dt=(elapsed>0 && elapsed<=max_control_gap_us) ? elapsed*0.000001f : 0;
+    uint32_t faults=reason | stop_outputs();
+    bool left=left_motor->rebaseFeedback(dt);
+    bool right=right_motor->rebaseFeedback(dt);
+    if (!left) faults|=MOTOR_LEFT_FEEDBACK_FAILED;
+    if (!right) faults|=MOTOR_RIGHT_FEEDBACK_FAILED;
+    if (!elapsed || elapsed>max_control_gap_us) faults|=MOTOR_SAMPLE_INTERVAL_INVALID;
+    status.faults=faults;
+    // 零区间补采样不可用，但显式 Stop 仍可成功关闭输出并解除运行故障。
+    status.mode=(reason || !left || !right ||
+        (faults & (MOTOR_LEFT_OUTPUT_FAILED|MOTOR_RIGHT_OUTPUT_FAILED))) ? MOTOR_FAULT : MOTOR_STOPPED;
+    last_update=now;
+    publish(now,elapsed,left && right);
+}
+bool request_valid(float left,float right) {
+    return initialized && status.mode!=MOTOR_FAULT &&
         std::isfinite(left) && std::isfinite(right) &&
-        std::fabs(left) <= config.left.duty_limit && std::fabs(right) <= config.right.duty_limit;
+        std::fabs(left)<=config.left.duty_limit && std::fabs(right)<=config.right.duty_limit;
+}
+uint32_t apply_output(float left,float right) {
+    bool l=left_motor->setDuty(left), r=right_motor->setDuty(right);
+    sync_output();
+    return (l ? 0U : uint32_t(MOTOR_LEFT_OUTPUT_FAILED)) | (r ? 0U : uint32_t(MOTOR_RIGHT_OUTPUT_FAILED));
+}
+// 单次更新：采集双轮、执行待处理命令、发布测量，不管理触发周期。
+void MotorApp_Update(uint32_t now) {
+    uint32_t elapsed=now-last_update;
+    last_update=now;
+    bool left=left_motor->updateFeedback(elapsed*0.000001f);
+    bool right=right_motor->updateFeedback(elapsed*0.000001f);
+    uint32_t faults=0;
+    if (!left) faults|=MOTOR_LEFT_FEEDBACK_FAILED;
+    if (!right) faults|=MOTOR_RIGHT_FEEDBACK_FAILED;
+    if (elapsed>max_control_gap_us) faults|=MOTOR_SAMPLE_INTERVAL_INVALID;
+    if (!faults && status.mode==MOTOR_DUTY)
+        faults|=apply_output(command.left_duty,command.right_duty);
+    if (faults) {
+        faults|=stop_outputs(); // 不重复采集、覆盖本次反馈。
+        status.mode=MOTOR_FAULT;
+    } else if (status.mode==MOTOR_DUTY) {
+        config.set_driver_enabled(true);
+    }
+    status.faults=faults;
+    publish(now,elapsed,left && right);
 }
 }
 
@@ -74,13 +120,14 @@ bool MotorApp_Init(const MotorAppConfig *settings, uint32_t now){
         settings->left.encoder==settings->right.encoder ||
         !settings->left.encoder->timer || !settings->right.encoder->timer ||
         settings->left.encoder->timer==settings->right.encoder->timer)
-        return false;
+        { status.faults=MOTOR_CONFIG_INVALID; return false; }
     config = *settings;
     config.set_driver_enabled(false);
     left_motor = new (left_motor_storage) Motor(config.left);
     if (!left_motor->begin()) {
         left_motor->stop();
         status.mode=MOTOR_FAULT;
+        status.faults=MOTOR_LEFT_INIT_FAILED;
         return false;
     }
     right_motor = new (right_motor_storage) Motor(config.right);
@@ -88,90 +135,50 @@ bool MotorApp_Init(const MotorAppConfig *settings, uint32_t now){
         left_motor->stop();
         right_motor->stop();
         status.mode=MOTOR_FAULT;
+        status.faults=MOTOR_RIGHT_INIT_FAILED;
         return false;
     }
     initialized=true;
-    last_update=last_command=now;
+    last_update=command.timestamp_us=now;
     status.mode=MOTOR_STOPPED;
-    snapshot(now);
+    status.faults=0;
+    sync_output();
     return true;
 }
-void MotorApp_Stop(uint32_t now)
-{
-    if (!initialized) return;
-    stop_and_sample(now, false);
-}
-bool MotorApp_IsActive(void){
-    return status.mode==MOTOR_DUTY; }
-
-void MotorApp_KeepAlive(uint32_t now){
-    if (MotorApp_IsActive()) last_command=now; }
-
-const MotorAppStatus *MotorApp_GetStatus(void) { return &status; }
-void MotorApp_SetFeedbackCallback(MotorAppFeedbackCallback callback) { feedback_callback = callback; }
-
-//暴露出来用于控制两个电机占空比的函数
-bool MotorApp_SetDuty(float left, float right, uint32_t now){
-    if (!request_valid(left,right)) return false;
-    // STOPPED 已关闭输出，启动只提交命令，不额外消耗编码器采样。
-    if (status.mode==MOTOR_FAULT) return false;
-    command.left_duty=left; command.right_duty=right;
-    status.mode=MOTOR_DUTY;
-    last_command=now;
-    // 输出在下一个调度周期统一写入，命令回调不直接启动电机。
-    return true;
-}
-
-// Closed-loop path: consume the already published feedback, then write this cycle's PWM.
-bool MotorApp_ApplyDuty(float left, float right, uint32_t now){
-    if (!request_valid(left,right) || !status.valid ||
-        !status.left.feedback_valid || !status.right.feedback_valid ||
-        (uint32_t)(now-status.timestamp_us)>7500U) return false;
-    bool left_ok=left_motor->setDuty(left);
-    bool right_ok=right_motor->setDuty(right);
-    if (!left_ok || !right_ok) { stop_and_sample(now,true); return false; }
-    command={left,right}; status.mode=MOTOR_DUTY; last_command=now;
-    config.set_driver_enabled(true);
-    // Do not change feedback sequence, interval or acquisition timestamp.
-    status.left.applied_duty=left_motor->state().applied_duty;
-    status.right.applied_duty=right_motor->state().applied_duty;
-    return true;
-}
-
-//更新函数，传入一个时间基准就能自动更新计算出速度
-//速度计算是要时刻更新的，但是占空比设置相对于速度计算独立，写个语句就能设置
-void MotorApp_Update(uint32_t now){
-    if (!initialized) return;
-    if (status.mode==MOTOR_FAULT) return;
+void MotorApp_Poll(uint32_t now, bool sample_requested) {
+    if (!initialized || status.mode==MOTOR_FAULT) return;
     uint32_t elapsed=now-last_update;
-    if (!elapsed) return;
-    bool active=MotorApp_IsActive();
-    if (active && (elapsed>max_control_gap_us || (uint32_t)(now-last_command)>=command_timeout_us)) {
-        stop_and_sample(now, true);
-        return;
+    uint32_t faults=0;
+    if (MotorApp_IsActive()) {
+        if (elapsed>max_control_gap_us) faults|=MOTOR_SAMPLE_INTERVAL_INVALID;
+        if ((uint32_t)(now-command.timestamp_us)>=command_timeout_us) faults|=MOTOR_COMMAND_TIMEOUT;
     }
-    last_update=now;
-    float dt=elapsed*0.000001f;
-    // 两轮都采样，不能因左轮失败而跳过右轮、造成采样区间错位。
-    bool left_ok = left_motor->updateFeedback(dt);
-    bool right_ok = right_motor->updateFeedback(dt);
-    bool feedback_ok = left_ok && right_ok;
-    bool output_ok = true;
-    if (feedback_ok && active) {
-        bool left_output = left_motor->setDuty(command.left_duty);
-        bool right_output = right_motor->setDuty(command.right_duty);
-        output_ok = left_output && right_output;
-    }
-    if (!feedback_ok || !output_ok) {
-        config.set_driver_enabled(false);
-        left_motor->stop();
-        right_motor->stop();
-        command = {};
-        status.mode = MOTOR_FAULT;
-        ++status.faults;
-        // 故障停机只关闭输出，不再次采集并覆盖刚得到的增量。
-    } else if (active) {
-        config.set_driver_enabled(true);
-    }
-    publish(now, elapsed, feedback_ok);
+    if (faults) { stop_and_sample(now,faults); return; }
+    if (sample_requested && elapsed) MotorApp_Update(now);
+}
+void MotorApp_Stop(uint32_t now) {
+    if (initialized) stop_and_sample(now,0);
+}
+bool MotorApp_IsActive(void) { return status.mode==MOTOR_DUTY; }
+void MotorApp_KeepAlive(uint32_t now) {
+    if (MotorApp_IsActive()) command.timestamp_us=now;
+}
+const MotorAppStatus *MotorApp_GetStatus(void) { return &status; }
+const MotorAppSample *MotorApp_GetSample(void) { return &sample; }
+void MotorApp_SetFeedbackCallback(MotorAppFeedbackCallback callback) { feedback_callback=callback; }
+bool MotorApp_SetDuty(float left,float right,uint32_t now) {
+    if (!request_valid(left,right)) return false;
+    command={left,right,now};
+    status.mode=MOTOR_DUTY;
+    return true;
+}
+bool MotorApp_ApplyDuty(float left,float right,uint32_t now) {
+    if (!request_valid(left,right) || !sample.valid ||
+        (uint32_t)(now-sample.timestamp_us)>7500U) return false;
+    uint32_t faults=apply_output(left,right);
+    if (faults) { stop_and_sample(now,faults); return false; }
+    command={left,right,now};
+    status.mode=MOTOR_DUTY;
+    config.set_driver_enabled(true);
+    return true;
 }

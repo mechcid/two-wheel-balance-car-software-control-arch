@@ -13,7 +13,7 @@ static StatusStateAppStatus status={.state=STATUS_STATE_NOT_INITIALIZED};
 static bool has_consumed_input;
 static uint32_t last_motor_sequence;
 /* 仅在同步回调期间借用；Poll 返回前消费，不跨回调保存。 */
-static const MotorAppStatus *pending_input;
+static const MotorAppSample *pending_input;
 
 /* 输出历史：首次成功发布也建立连续航向的起点。
  * 不以 sequence != 0 判断，避免序号回绕时误认为从未发布。 */
@@ -31,7 +31,7 @@ static float left_radius_m, right_radius_m;
 static const uint32_t max_attitude_age_us=7500, state_timeout_us=20000;
 
 /* 单次更新：失败也消费输入并维护里程计连续性，但不发布新样本。 */
-static void StatusStateApp_Update(const MotorAppStatus *m){
+static void StatusStateApp_Update(const MotorAppSample *m){
     //拿到两个模块维护变量的指针，用于提取三轴角度，或者说姿态，和角速度
     const MotionSample *pose=MotionApp_GetSample();
     const ImuSample *imu=SensorApp_GetSample();
@@ -98,7 +98,7 @@ static void StatusStateApp_Update(const MotorAppStatus *m){
     has_published_sample=true;
     status.state=STATUS_STATE_RUNNING;
 }
-static void on_motor_feedback(const MotorAppStatus *m)
+static void on_motor_feedback(const MotorAppSample *m)
 {
     /* 不等待下一轮主循环：停机补采样也必须在覆盖前消费。 */
     pending_input=m;
@@ -124,8 +124,22 @@ bool StatusStateApp_Init(float left_radius, float right_radius)
 void StatusStateApp_Poll(uint32_t now)
 {
     if (status.state==STATUS_STATE_NOT_INITIALIZED) return;
-    if (pending_input && (!has_consumed_input || pending_input->sequence!=last_motor_sequence)) {
-        StatusStateApp_Update(pending_input);
+    if (pending_input) {
+        // 失败通知沿用上次成功序号，必须先处理失效，再做成功样本去重。
+        if (!pending_input->valid) {
+            state.valid=false;
+            status.state=STATUS_STATE_UNAVAILABLE;
+            status.faults|=STATUS_STATE_MOTOR_INVALID;
+            pitch_history_valid=false;
+            if (odometry.initialized) { odometry.valid=false; odometry.continuous=false; }
+        } else if (!has_consumed_input || pending_input->sequence!=last_motor_sequence) {
+            if (pending_input->discontinuity && has_consumed_input) {
+                pitch_history_valid=false;
+                odometry.valid=false;
+                odometry.continuous=false;
+            }
+            StatusStateApp_Update(pending_input);
+        }
     }
     /* 等待首帧不是过期；失败原因由 Update 记录。 */
     if (!has_consumed_input) return;

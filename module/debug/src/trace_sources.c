@@ -12,15 +12,21 @@ static bool lqr_snapshot(void *context, TraceBusinessStatus *b, void *payload, u
     (void)context;
     if (capacity<sizeof(LqrTracePayload)) return false;
     const LqrStatus *s=LqrApp_GetStatus();
-    *b=(TraceBusinessStatus){.mode=s->mode==LQR_HOLD ? TRACE_BUSINESS_RUNNING :
+    const LqrSample *sample=LqrApp_GetSample();
+    *b=(TraceBusinessStatus){.mode=s->mode==LQR_RUNNING ? TRACE_BUSINESS_RUNNING :
         s->mode==LQR_FAULT ? TRACE_BUSINESS_FAULT : TRACE_BUSINESS_STOPPED,
-        .has_sample=s->updates>0,.valid=s->data_valid,.faults=s->faults,
-        .timestamp_us=s->mode==LQR_HOLD ? s->timestamp_us : s->event_timestamp_us,
-        .sequence=s->sequence};
-    LqrTracePayload p={.input_timestamp_us=s->input_timestamp_us,.input_sequence=s->state_sequence,
-        .dt_us=s->dt_us,.age_us=s->data_age_us,.pitch_rate_scale=s->pitch_rate_scale,.yaw_rate_scale=s->yaw_rate_scale};
-    memcpy(p.error,s->error,sizeof p.error); memcpy(p.torque_nm,s->requested_nm,sizeof p.torque_nm);
-    memcpy(p.duty,s->duty,sizeof p.duty); memcpy(p.relative_rpm,s->relative_rpm,sizeof p.relative_rpm);
+        .has_sample=s->has_output,.valid=sample->valid,.faults=s->faults,
+        .timestamp_us=s->mode==LQR_RUNNING ? sample->timestamp_us : s->event_timestamp_us,
+        .sequence=sample->sequence};
+    /* 保持格式 3 的字段布局；载荷只描述最后一次成功输出，事件由 header 表达。 */
+    LqrTracePayload p={.input_timestamp_us=sample->state_source.timestamp_us,
+        .input_sequence=sample->state_source.sequence,
+        .dt_us=sample->dt_us,.age_us=sample->data_age_us,
+        .pitch_rate_scale=sample->tuning.pitch_rate_scale,.yaw_rate_scale=sample->tuning.yaw_rate_scale};
+    memcpy(p.error,sample->data.error,sizeof p.error);
+    memcpy(p.torque_nm,sample->data.requested_nm,sizeof p.torque_nm);
+    memcpy(p.duty,sample->data.duty,sizeof p.duty);
+    memcpy(p.relative_rpm,sample->relative_rpm,sizeof p.relative_rpm);
     memcpy(payload,&p,sizeof p);
     return true;
 }

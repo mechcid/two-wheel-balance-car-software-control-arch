@@ -10,11 +10,11 @@
 static MotionSample pose;
 static ImuSample imu;
 static MotorAppFeedbackCallback callback;
-static MotorAppStatus motor;
+static MotorAppSample motor;
 const MotionSample *MotionApp_GetSample(void) { return &pose; }
 const ImuSample *SensorApp_GetSample(void) { return &imu; }
 void MotorApp_SetFeedbackCallback(MotorAppFeedbackCallback cb) { callback=cb; }
-void MotorApp_Update(uint32_t now) { (void)now; callback(&motor); }
+void MotorApp_Poll(uint32_t now, bool requested) { (void)now; if (requested) callback(&motor); }
 static void near(float a,float b) { assert(fabsf(a-b)<0.0001f); }
 static void frame(uint32_t t, uint32_t seq, float left, float right) {
     motor.timestamp_us=t; motor.sequence=seq; motor.interval_us=10000; motor.valid=true;
@@ -59,8 +59,8 @@ int main(void) {
     callback(&motor); assert(StatusStateApp_GetState()->sequence==seq);
     StatusState previous=*StatusStateApp_GetState();
     assert(StatusStateApp_GetState()->sequence==3);
-    motor.sequence=4; motor.timestamp_us=21000; motor.valid=false;
-    MotorApp_Update(21000); StatusStateApp_Poll(21000); assert(!StatusStateApp_GetState()->valid);
+    motor.valid=false; /* 失败通知保留上一成功序号、时间和数值。 */
+    MotorApp_Poll(21000,true); StatusStateApp_Poll(21000); assert(!StatusStateApp_GetState()->valid);
     assert(StatusStateApp_GetStatus()->faults&STATUS_STATE_MOTOR_INVALID);
     assert(StatusStateApp_GetState()->sequence==previous.sequence);
     assert(StatusStateApp_GetState()->timestamp_us==previous.timestamp_us);
@@ -160,6 +160,17 @@ int main(void) {
     callback(&motor);
     assert(StatusStateApp_GetStatus()->faults&STATUS_STATE_TIME_MISMATCH);
     assert(StatusStateApp_GetState()->sequence==0);
+    // 即使漏掉失败回调，首份恢复样本的 gap 也必须使已建里程计失效。
+    assert(StatusStateApp_Init(0.03f,0.04f));
+    frame(60000,1,0,0);
+    assert(StatusStateApp_GetState()->valid);
+    motor.discontinuity=true;
+    frame(70000,2,0.01f,0.01f);
+    assert(!StatusStateApp_GetState()->valid);
+    assert(StatusStateApp_GetStatus()->faults&STATUS_STATE_POSITION_DISCONTINUOUS);
+    motor.discontinuity=false;
+    frame(80000,3,0.01f,0.01f);
+    assert(!StatusStateApp_GetState()->valid);
     puts("PASS: publication integrity, failed-frame deduplication, synchronous increments and status transitions");
     puts("PASS: body pitch compensation, both signs, unequal radii, translation plus pitch");
     puts("PASS: signed odometry, wrap/midpoint, duplicate/missed samples, state order/units/rates, stale data and continuity");

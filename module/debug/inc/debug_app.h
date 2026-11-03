@@ -8,6 +8,8 @@ typedef enum { DEBUG_TRACE_LQR, DEBUG_TRACE_IMU } DebugTraceSource;
 Trace *DebugApp_GetTrace(DebugTraceSource source);
 /* main 先初始化两个有类型记录器，再注入调试协调层。 */
 bool DebugApp_Init(LqrTrace *lqr, ImuTrace *imu);
+/* 组合保持参考创建与控制器启动；LQR 本身只读取参考。 */
+bool DebugApp_StartHold(uint32_t now_us);
 bool DebugApp_StartTrial(uint32_t now_us, bool use_070_scale);
 void DebugApp_Stop(uint32_t now_us);
 /* 主循环业务更新之后调用，负责限时停机、Trace 轮询和调试参数恢复。 */

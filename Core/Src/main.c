@@ -96,7 +96,7 @@ static void report_task(void *context){
 
   //TelemetryApp_ReportImu(SensorApp_GetSample(), sample_available());
   //TelemetryApp_ReportAttitude(sample_available());
-  //TelemetryApp_ReportMotor(MotorApp_GetStatus());
+  //TelemetryApp_ReportMotor(MotorApp_GetSample());
   TelemetryApp_ReportState(StatusStateApp_GetState());
 }
 //解析字符串命令任务
@@ -193,6 +193,7 @@ int main(void)
                                            motor_config->right.radius_m)) Error_Handler();
   LqrConfig lqr_config=LqrApp_DefaultConfig();
   LqrTuning lqr_tuning=LqrApp_DefaultTuning();
+  if (!TrajectoryApp_Init()) Error_Handler();
   if (!LqrApp_Init(&lqr_config,&lqr_tuning)) Error_Handler();
   /* 两个记录器拥有独立的类型化数组；初始化不启动记录或电机。 */
   if (!LqrTrace_Init(&lqr_trace) || !ImuTrace_Init(&imu_trace)) Error_Handler();
@@ -222,11 +223,14 @@ int main(void)
         (!have_control_sample || pose->sequence!=last_control_sample_sequence)) {
       last_control_sample_sequence=pose->sequence;
       have_control_sample=true;
-      MotorApp_Update(now); /* Synchronously publishes every wheel increment. */
+      MotorApp_Poll(now,true); /* Synchronously publishes every wheel increment. */
       StatusStateApp_Poll(now);
-      LqrApp_Update(Timebase_NowUs());
+      TrajectoryApp_Poll(Timebase_NowUs());
+      LqrApp_Poll(Timebase_NowUs());
     } else {
+      MotorApp_Poll(now,false);
       StatusStateApp_Poll(now);
+      TrajectoryApp_Poll(now);
       LqrApp_Poll(now);
     }
     DebugApp_Poll(Timebase_NowUs());
