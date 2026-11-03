@@ -21,6 +21,8 @@ int main(int argc,char **argv) {
     uint32_t origin=now;
     publish(); MotionApp_Poll();
     assert(MotionApp_GetSample()->sequence==1);
+    assert(MotionApp_GetSample()->imu_source.sequence==1);
+    assert(MotionApp_GetSample()->imu_source.timestamp_us==input.timestamp_us);
     if (argc>1) {
         uint32_t last_processed=now, last_sequence=1;
         for (uint32_t elapsed=100;elapsed<=1000000;elapsed+=100) {
@@ -31,6 +33,8 @@ int main(int argc,char **argv) {
             if (s->sequence!=last_sequence) {
                 assert((uint32_t)(now-last_processed)>=MOTION_MIN_UPDATE_INTERVAL_US);
                 assert(s->timestamp_us==input.timestamp_us && s->valid);
+                assert(s->imu_source.sequence==input.sequence);
+                assert(s->imu_source.timestamp_us==input.timestamp_us);
                 last_processed=now;last_sequence=s->sequence;
             }
         }
@@ -43,6 +47,8 @@ int main(int argc,char **argv) {
     now=origin+MOTION_MIN_UPDATE_INTERVAL_US-1;
     publish(); MotionApp_Poll();
     assert(MotionApp_GetSample()->sequence==1);
+    assert(MotionApp_GetSample()->imu_source.sequence==1);
+    assert(MotionApp_GetSample()->imu_source.timestamp_us==origin);
     now++;
     MotionApp_Poll();
     assert(MotionApp_GetSample()->sequence==2);
@@ -55,7 +61,10 @@ int main(int argc,char **argv) {
     MotionApp_Poll(); assert(MotionApp_GetSample()->sequence==2);
     now++;publish();MotionApp_Poll();assert(MotionApp_GetSample()->sequence==3);
     /* 周期尚未到，输入失效也必须立即处理。 */
+    SampleSource previous=MotionApp_GetSample()->imu_source;
     input.valid=false;now++;MotionApp_Poll();
+    assert(MotionApp_GetSample()->imu_source.sequence==previous.sequence);
+    assert(MotionApp_GetSample()->imu_source.timestamp_us==previous.timestamp_us);
     assert(!MotionApp_GetSample()->valid);
     assert(MotionApp_GetStatus()->state==MOTION_INPUT_UNAVAILABLE);
     assert(MotionApp_GetStatus()->fail_update_count==0);

@@ -1,6 +1,8 @@
+> 编辑时间：2026-11-02 20:44（北京时间，UTC+8）
+
 # LQR 状态向量接口
 
-本次提供状态估计和读取接口，不接入 K、不输出 LQR 控制量，也不修改电机接线、方向、比例和输出限制。单轮增量沿用当前代码中的 delta_displacement_m。
+本模块提供状态估计和只读接口，供 LQR 使用；控制量由 lqr_app 计算。单轮增量沿用当前代码中的 delta_displacement_m。
 
 ## 职责与调用
 
@@ -8,9 +10,20 @@
 - odometry_app：独立计算轮轴中点的平面 x/y 与沿车体前进方向的有符号速度。算法不依赖硬件，可直接做主机测试。
 - status_state_app：读取姿态与同帧校准陀螺仪，检查时间与有效性，更新里程计并发布整份状态。
 
-main 中 MotionApp_Poll 保持约 200 Hz；原 motor_task 替换为约 100 Hz 的 state_task，调用 StatusStateApp_Update，由它调用 MotorApp_Update。StatusStateApp_Init 在姿态和电机初始化之后注册双轮反馈回调；每帧反馈（包括停止补采样）都会在回调中更新状态。不要再额外调度 MotorApp_Update，也不要覆盖其反馈回调。主循环每轮调用 StatusStateApp_Poll，及时将过期状态置为无效。
+主循环先运行 SensorApp_Poll、MotionApp_Poll，等待新的姿态与 IMU 样本匹配，再依次执行 MotorApp_Update、StatusStateApp_Poll、LqrApp_Update。正常采样和控制沿用约 200 Hz 的输入节奏，不引入独立控制相位；没有新姿态时仍轮询状态与 LQR 的失效检查。
 
-StatusStateApp_GetState 返回带命名成员、时间戳、序号和错误位的最新状态。StatusStateApp_GetVector(out) 按 [x,y,theta,psi,v,theta_dot,psi_dot] 复制 7 个 float，无效时返回 false 并保留 out 原值，调用者不能继续使用旧 out 控制。控制器应按新 sequence 执行一次。当前没有控制器。
+StatusStateApp_Init 在姿态和电机初始化之后注册双轮反馈回调。每帧反馈（包括停机补采样）都同步进入 StatusStateApp_Poll，由它检查新输入并调用内部 static Update。回调仅在调用期间借用反馈指针，返回前完成消费，不等待下一轮主循环，避免多次发布覆盖位移增量。主循环的 Poll 在无新输入时只检查失效。所有入口在主循环上下文运行，不支持中断或并发调用；不要覆盖反馈回调。
+
+模块按四部分组织：
+
+- `StatusState`：完整状态向量、测量时间戳、成功发布序号、有效性，以及 `motion`、`imu`、`motor` 三份来源标识，每份包含 `timestamp_us` 和 `sequence`。来源随成功输出一起发布，失败时保留旧来源。输出时间戳仍取电机采样时间。
+- `StatusStateAppStatus`：未初始化、等待首帧、正常运行、不可用四种运行状态；当前原因位掩码 `faults`。不另设成功或失败计数，成功发布进度由样本序列号体现。
+- 内部 `StatusStateApp_Update`：检查输入、计算、维护里程计，成功后一次性发布完整样本。失败时保留上次发布的数值、时间戳和序号，仅将样本标为不可用并记录原因。内部单独记录已消费电机序号，失败帧也不重复处理。
+- 公开 `StatusStateApp_Poll`：按新反馈触发更新，并维护失效检查。重复帧不重复处理，轮询和超时检查不推进样本序列号；电机采样由主循环调度。
+
+内部只保留三个含义不同的历史标志：`has_consumed_input` 表示处理过输入（包括失败帧），`has_published_sample` 表示成功发布过样本并已建立航向起点，`pitch_history_valid` 表示上一份俯仰仍可用于增量计算。初始化状态直接由 `status.state` 判断，不再重复维护布尔标志。样本是否可用于控制由 `valid` 表达，模块状态和原因供诊断查询。
+
+StatusStateApp_GetState 和 StatusStateApp_GetStatus 分别返回只读数据与运行状态。StatusStateApp_GetVector(out) 按 [x,y,theta,psi,v,theta_dot,psi_dot] 复制 7 个 float，无效时返回 false 并保留 out 原值，调用者不能继续使用旧 out 控制。LQR 仍检查数据时效和对应的电机序号。
 
 ## 坐标与单位（接入 K 前必须核对）
 
@@ -29,11 +42,11 @@ MotorState.velocity_mps 与 rpm 共用 feedback_valid。正常反馈和具有有
 
 ## 时间与有效性
 
-双轮时间戳作为状态时间戳，保留原始姿态时间戳。姿态与校准 IMU 必须对应同一读取时间，且姿态不得晚于双轮采样，最多允许落后 7500 us。这是有界延迟组合，不是硬件同步或插值；MPU 时间戳本身是读取开始时刻。中间航向计算使用两次通过检查的姿态，不能声称已经消除该延迟误差。
+双轮时间戳作为状态时间戳，保留原始姿态时间戳。姿态通过 `MotionSample.imu_source` 记录实际消费的 IMU。状态模块检查该来源的序号和时间戳与当前 IMU 都一致，并确认姿态时间戳与其输入时间相同；不匹配时拒绝组合，不缓存或找回旧 IMU。姿态与校准 IMU 必须对应同一读取时间，且姿态不得晚于双轮采样，最多允许落后 7500 us。这是有界延迟组合，不是硬件同步或插值；MPU 时间戳本身是读取开始时刻。中间航向计算使用两次通过检查的姿态，不能声称已经消除该延迟误差。
 
-状态超过 20000 us 没更新则不可用，不会因为轮询而更新序号。有效性检查不改变电机输出，尚未接入控制层安全决策。周期约 100 Hz，停止补采样可能插入额外帧；后续离散 LQR 的设计周期需匹配，不能直接把每次补采样当作固定步长控制触发。
+状态超过 20000 us 没成功更新则不可用，不会因为轮询而更新序号。初始化后尚无反馈时标记等待输入，样本无效。状态模块自身不改变电机输出；LQR 根据状态执行相应保护。正常周期约 200 Hz，停止补采样可能插入额外帧，不能将每次补采样都当作固定步长控制触发。
 
-faults 是当前位掩码（不是故障次数）：
+StatusStateApp_GetStatus()->faults 是当前位掩码（不是故障次数）：
 
 | 位值 | 含义 |
 |---|---|
@@ -41,15 +54,15 @@ faults 是当前位掩码（不是故障次数）：
 | 0x02 | 姿态/IMU 无效、姿态不连续、数值异常或欧拉角奇异 |
 | 0x04 | 姿态来源不匹配或时间偏差超限 |
 | 0x08 | 位置尚未建立或累计不连续 |
-| 0x10 | 未收到状态或状态过期 |
+| 0x10 | 已发布样本过期 |
 
-重复电机序号不重复积分；跳号或无效帧会保留已知位置并永久标记连续性丢失。恢复时先重建航向区间起点，再累计后续可信小段，完整状态仍保持无效，直到显式重建原点。姿态原有 discontinuity 也是持续标记，重置位置不会掩盖姿态历史缺样。valid 表示满足本接口的使用条件，不代表无航向漂移、无轮胎打滑或绝对定位准确。
+重复电机序号不重复积分；已建立位置基准后，跳号或无效帧会保留已知位置并永久标记连续性丢失。内部里程计恢复时先重建航向区间起点，再累计后续可信小段；对外样本保持最后一次成功发布的数值，完整状态仍不可用，直到显式重建原点。姿态原有 discontinuity 也是持续标记，重置位置不会掩盖姿态历史缺样。valid 表示满足本接口的使用条件，不代表无航向漂移、无轮胎打滑或绝对定位准确。
 
 ## 查询与测试
 
-串口发送 @state（实际 CRLF 结尾），查看两种时间戳、序号、valid、faults 和全部 7 个量。数值放大 1000 倍打印：位置 mm、角度 mrad、速度 mm/s、角速度 mrad/s。另提供 TelemetryApp_ReportState(StatusStateApp_GetState()) 周期打印，在 main.c 的 report_task 中注释或取消注释即可独立选择，与其他打印函数并列。受 @stream 总开关控制，无效帧也输出以便诊断。
+串口发送 @state（实际 CRLF 结尾），查看样本时间戳、序号、valid、faults 和全部 7 个量；额外的 `STATE sources` 行按 motion、imu、motor 顺序显示每个来源的序号和时间戳。数值放大 1000 倍打印：位置 mm、角度 mrad、速度 mm/s、角速度 mrad/s。另提供 TelemetryApp_ReportState(StatusStateApp_GetState()) 周期打印，在 main.c 的 report_task 中注释或取消注释即可独立选择，与其他打印函数并列。受 @stream 总开关控制，无效帧也输出以便诊断。
 
-周期格式：STATE,timestamp_us,sequence,valid,faults,x_mm,y_mm,theta_mrad,psi_mrad,v_mmps,theta_dot_mradps,psi_dot_mradps。faults 为十六进制，其余整数为十进制；当前周期为 500 ms。
+周期格式：STATE,timestamp_us,sequence,valid,faults,x_mm,y_mm,theta_mrad,psi_mrad,v_mmps,theta_dot_mradps,psi_dot_mradps。faults 从模块运行状态读取，描述当前不可用原因；其为十六进制，其余整数为十进制；当前周期为 500 ms。
 
 bash tests/status_state/run.sh 覆盖前后运动、两轮平均、重复/漏帧、序号及时间回绕、中间航向跨界、状态顺序和单位、欧拉角导数、过期/姿态失效与位置连续性。该测试模拟输入，不替代轮轴坐标方向与真实时间抖动的实机验证。
 

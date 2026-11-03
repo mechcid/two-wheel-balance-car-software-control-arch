@@ -55,6 +55,7 @@ static bool MotionApp_Update(const ImuSample *input)
     MotionSample next={
         .timestamp_us=input->timestamp_us,
         .sequence=sample.sequence+1U,
+        .imu_source={.timestamp_us=input->timestamp_us, .sequence=input->sequence},
         .valid=true,
         .discontinuity=estimator.state.discontinuity};
     MotionEstimator_GetEuler(&estimator,&next.data);

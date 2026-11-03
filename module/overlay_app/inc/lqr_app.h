@@ -45,7 +45,7 @@ LqrTuning LqrApp_GetTuning(void);
 bool LqrApp_Init(const LqrConfig *config, const LqrTuning *tuning);
 bool LqrApp_Start(uint32_t now_us);
 void LqrApp_Stop(uint32_t now_us);
-/* Update after fresh StatusStateApp_Update; Poll every main-loop iteration. */
+/* Update after fresh motor feedback and StatusStateApp_Poll; Poll every main-loop iteration. */
 void LqrApp_Update(uint32_t now_us);
 void LqrApp_Poll(uint32_t now_us);
 bool LqrApp_IsActive(void);

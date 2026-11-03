@@ -1,6 +1,7 @@
 #ifndef MOTION_APP_H
 #define MOTION_APP_H
 #include "motion_estimator.h"
+#include "sample_source.h"
 #include <stdint.h>
 
 /* 姿态处理频率上限，与 IMU 输出频率独立；实际更新还需要新输入。
@@ -23,6 +24,7 @@ typedef struct {
     uint32_t sequence;     /* 成功发布才递增，与输入序号独立。 */
     bool valid;
     bool discontinuity;   /* 缺样导致的连续性丢失，恢复有效后仍保留。 */
+    SampleSource imu_source; /* 本次计算实际消费的 IMU；仅随成功发布更新。 */
 } MotionSample;
 
 typedef enum {

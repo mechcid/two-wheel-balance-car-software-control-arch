@@ -57,11 +57,11 @@ static void lqr_check(void) {
     const MotorAppStatus *m=MotorApp_GetStatus();
     const MotionSample *pose=MotionApp_GetSample();
     UART_Printf("LQR CHECK valid=%u faults=0x%lX state_age_us=%lu imu_age_us=%lu theta_mrad=%ld\r\n",
-        s->valid,(unsigned long)s->faults,(unsigned long)(now-s->timestamp_us),
-        (unsigned long)(now-s->attitude_timestamp_us),milli(s->theta_rad));
+        s->valid,(unsigned long)StatusStateApp_GetStatus()->faults,(unsigned long)(now-s->timestamp_us),
+        (unsigned long)(now-s->motion.timestamp_us),milli(s->theta_rad));
     UART_Printf("LQR CHECK motor_mode=%u frame=%u wheels=%u,%u seq_match=%u pose_valid=%u pose_gap=%u\r\n",
         (unsigned)m->mode,m->valid,m->left.feedback_valid,m->right.feedback_valid,
-        s->motor_sequence==m->sequence,pose->valid,pose->discontinuity);
+        s->motor.sequence==m->sequence,pose->valid,pose->discontinuity);
 }
 static void lqr_soft_trial(void) {
     bool ok=DebugApp_StartTrial(Timebase_NowUs(),true);
@@ -139,8 +139,12 @@ static void state_status(void)
     const StatusState *s=StatusStateApp_GetState();
     UART_Printf("STATE seq=%lu us=%lu imu_us=%lu motor_seq=%lu valid=%u faults=0x%lX\r\n",
         (unsigned long)s->sequence,(unsigned long)s->timestamp_us,
-        (unsigned long)s->attitude_timestamp_us,(unsigned long)s->motor_sequence,
-        s->valid,(unsigned long)s->faults);
+        (unsigned long)s->motion.timestamp_us,(unsigned long)s->motor.sequence,
+        s->valid,(unsigned long)StatusStateApp_GetStatus()->faults);
+    UART_Printf("STATE sources motion=%lu,%lu imu=%lu,%lu motor=%lu,%lu (seq,us)\r\n",
+        (unsigned long)s->motion.sequence,(unsigned long)s->motion.timestamp_us,
+        (unsigned long)s->imu.sequence,(unsigned long)s->imu.timestamp_us,
+        (unsigned long)s->motor.sequence,(unsigned long)s->motor.timestamp_us);
     UART_Printf("STATE x_mm=%ld y_mm=%ld theta_mrad=%ld psi_mrad=%ld\r\n",
         milli(s->x_m),milli(s->y_m),milli(s->theta_rad),milli(s->psi_rad));
     UART_Printf("STATE v_mmps=%ld theta_dot_mradps=%ld psi_dot_mradps=%ld\r\n",
@@ -245,7 +249,7 @@ void TelemetryApp_ReportState(const StatusState *s){
     if (!initialized || !stream || !s) return;
     UART_Printf("STATE,%lu,%lu,%u,0x%lX, %ld,%ld,%ld,%ld,%ld,%ld,%ld\r\n",
         (unsigned long)s->timestamp_us,(unsigned long)s->sequence,
-        s->valid,(unsigned long)s->faults,
+        s->valid,(unsigned long)StatusStateApp_GetStatus()->faults,
         milli(s->x_m),milli(s->y_m),milli(s->theta_rad),milli(s->psi_rad),
         milli(s->v_mps),milli(s->theta_dot_radps),milli(s->psi_dot_radps));
 }

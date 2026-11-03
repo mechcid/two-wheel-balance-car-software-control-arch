@@ -81,7 +81,7 @@ bool LqrApp_Init(const LqrConfig *c, const LqrTuning *t)
 }
 static bool fresh(const StatusState *s, uint32_t now){
     return s->valid && (uint32_t)(now-s->timestamp_us)<=max_age_us &&
-        (uint32_t)(now-s->attitude_timestamp_us)<=max_age_us;
+        (uint32_t)(now-s->motion.timestamp_us)<=max_age_us;
 }
 
 //进行错误检测的函数
@@ -98,7 +98,7 @@ bool LqrApp_Start(uint32_t now){
     const StatusState *s=StatusStateApp_GetState();
     const MotorAppStatus *m=MotorApp_GetStatus();
     if (!fresh(s,now) || !m->valid || !m->left.feedback_valid || !m->right.feedback_valid ||
-        s->motor_sequence!=m->sequence || fabsf(s->theta_rad)>config.limits.start_angle_rad) return false;
+        s->motor.sequence!=m->sequence || fabsf(s->theta_rad)>config.limits.start_angle_rad) return false;
     LqrStatus next={0};
     next.hold[0]=s->x_m; next.hold[1]=s->y_m; next.hold[2]=s->psi_rad;
     float rpm[2]={m->left.rpm,m->right.rpm};
@@ -135,14 +135,14 @@ void LqrApp_Update(uint32_t now)
     const MotorAppStatus *m=MotorApp_GetStatus();
     float rpm[2]={m->left.rpm,m->right.rpm};
     if (!m->valid || !m->left.feedback_valid || !m->right.feedback_valid ||
-        s->motor_sequence!=m->sequence || !LqrApp_Calculate(s,status.hold,rpm,&config,&tuning,&status)) {
+        s->motor.sequence!=m->sequence || !LqrApp_Calculate(s,status.hold,rpm,&config,&tuning,&status)) {
         fault(LQR_BAD_STATE,now); return;
     }
     if (fabsf(status.error[0])>config.limits.max_position_m ||
         fabsf(status.error[1])>config.limits.max_yaw_rad || fabsf(status.error[2])>config.limits.stop_angle_rad) {
         fault(LQR_RANGE,now); return;
     }
-    status.dt_us=dt; status.timestamp_us=now; status.data_age_us=now-s->attitude_timestamp_us;
+    status.dt_us=dt; status.timestamp_us=now; status.data_age_us=now-s->motion.timestamp_us;
     status.state_sequence=s->sequence;
     last_sample_us=s->timestamp_us;
     if (!MotorApp_ApplyDuty(status.duty[0],status.duty[1],now)) { fault(LQR_OUTPUT,now); return; }

@@ -216,11 +216,14 @@ int main(void)
     /* 姿态可能因频率上限延后处理；等待匹配的新姿态再采样电机并控制。
      * 不能把新 IMU 与旧姿态拼成一帧，也不建立独立控制相位。 */
     if (sample->valid && pose->valid && pose->timestamp_us==sample->timestamp_us &&
+        pose->imu_source.timestamp_us==sample->timestamp_us &&
+        pose->imu_source.sequence==sample->sequence &&
         (uint32_t)(now-pose->timestamp_us)<IMU_TIMEOUT_US &&
         (!have_control_sample || pose->sequence!=last_control_sample_sequence)) {
       last_control_sample_sequence=pose->sequence;
       have_control_sample=true;
-      StatusStateApp_Update(now);
+      MotorApp_Update(now); /* Synchronously publishes every wheel increment. */
+      StatusStateApp_Poll(now);
       LqrApp_Update(Timebase_NowUs());
     } else {
       StatusStateApp_Poll(now);

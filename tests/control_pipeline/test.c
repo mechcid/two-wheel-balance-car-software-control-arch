@@ -59,7 +59,7 @@ int main(int argc,char **argv) {
         if (armed && !LqrApp_IsActive()) {
             fprintf(stderr,"FAIL delay=%u now=%u state=%u attitude=%u fault=%u outputs=%u\n",
                 delay,now_us,StatusStateApp_GetState()->timestamp_us,
-                StatusStateApp_GetState()->attitude_timestamp_us,LqrApp_GetStatus()->faults,output_count);
+                StatusStateApp_GetState()->motion.timestamp_us,LqrApp_GetStatus()->faults,output_count);
             return 1;
         }
         now_us+=100;

@@ -29,8 +29,8 @@ bool MotorApp_ApplyDuty(float l, float r, uint32_t now) {
     ++writes; motor.mode=MOTOR_DUTY; return true;
 }
 static void frame(uint32_t now) {
-    state.timestamp_us=state.attitude_timestamp_us=now; ++state.sequence;
-    state.motor_sequence=++motor.sequence; state.valid=true;
+    state.timestamp_us=state.motion.timestamp_us=now; ++state.sequence;
+    state.motor.sequence=++motor.sequence; state.valid=true;
     motor.valid=motor.left.feedback_valid=motor.right.feedback_valid=true;
 }
 static void near(float a,float b) { if (fabsf(a-b)>=1e-5f) fprintf(stderr,"near: actual=%g expected=%g\n",a,b); assert(fabsf(a-b)<1e-5f); }
@@ -123,7 +123,7 @@ int main(int argc, char **argv) {
     now+=5000; frame(now); reject_output=true; update(now);
     assert(LqrApp_GetStatus()->faults & LQR_OUTPUT);
     DebugApp_Stop(now); reject_output=false; frame(now); assert(LqrApp_Start(now));
-    now+=5000; frame(now); state.attitude_timestamp_us=now-7501; update(now);
+    now+=5000; frame(now); state.motion.timestamp_us=now-7501; update(now);
     assert(LqrApp_GetStatus()->faults & LQR_BAD_STATE);
     DebugApp_Stop(now); frame(now); state.theta_rad=.11f; assert(!LqrApp_Start(now));
     state.theta_rad=0; frame(now); assert(DebugApp_StartTrial(now,false));
