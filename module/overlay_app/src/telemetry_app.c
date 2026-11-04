@@ -87,7 +87,7 @@ static void imu_trace_arm(void) {
     UART_Printf("IMU TRACE arm %s\r\n",TraceApp_Arm(DebugApp_GetTrace(DEBUG_TRACE_IMU)) ? "OK" : "REJECTED");
 }
 static void imu_trace_freeze(void) {
-    TraceApp_Freeze(DebugApp_GetTrace(DEBUG_TRACE_IMU),Timebase_NowUs());
+    TraceSources_Freeze(DebugApp_GetTrace(DEBUG_TRACE_IMU),Timebase_NowUs());
 }
 static void print_trace_status(DebugTraceSource source) {
     Trace *t=DebugApp_GetTrace(source);
@@ -96,9 +96,9 @@ static void print_trace_status(DebugTraceSource source) {
     UART_Printf("TRACE mode=%u reason=%u source=%lu format=%lu session=%lu\r\n",
         (unsigned)s->mode,(unsigned)s->freeze_reason,(unsigned long)s->source_id,
         (unsigned long)s->format_id,(unsigned long)s->session);
-    UART_Printf("TRACE count=%lu capacity=%u next=%lu total=%lu duplicate=%lu\r\n",
+    UART_Printf("TRACE count=%lu capacity=%u next=%lu total=%lu\r\n",
         (unsigned long)s->count,(unsigned)t->config.capacity,(unsigned long)s->write_index,
-        (unsigned long)s->total_written,(unsigned long)s->duplicate_frames);
+        (unsigned long)s->total_written);
 }
 static void trace_status(void) {
     print_trace_status(DEBUG_TRACE_LQR);

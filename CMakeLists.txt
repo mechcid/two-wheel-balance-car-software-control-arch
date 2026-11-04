@@ -72,6 +72,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     module/pose_estimate/src/odometry_app.c
 
     module/debug/src/debug_app.c
+    module/debug/src/lqr_trace.c
+    module/debug/src/imu_trace.c
     module/debug/src/trace_sources.c
     module/debug/src/trace_app.c
 )

@@ -83,6 +83,24 @@ with tempfile.TemporaryDirectory(prefix='trace-tools-test-') as temporary:
     imu_path.write_text(json.dumps(imu))
     report(imu_path)
 
+    periodic=copy.deepcopy(new_document)
+    periodic['status'].update(format_id=4,payload_size=84)
+    for f in periodic['frames']:
+        f.update(sample_timestamp_us=123,sample_sequence=7,sample_valid=f['valid'],yaw_rate_scale=.5)
+    periodic['frames'][-1]['error'][0]=None # Non-finite terminal diagnostics export as JSON null.
+    _,_,rows=flatten(periodic)
+    assert rows[-1]['sample_sequence']==7 and rows[-1]['pitch_rad']==periodic['frames'][-1]['error'][2]
+    assert rows[-1]['x_error_m'] is None
+    periodic_path=root/'periodic.json'; periodic_path.write_text(json.dumps(periodic))
+    artifacts=report(periodic_path)
+    with artifacts[0].open() as stream:
+        terminal=list(csv.DictReader(stream))[-1]
+    assert terminal['sample_sequence']=='7' and terminal['duty_left']!=''
+    periodic_imu=copy.deepcopy(imu)
+    periodic_imu['status'].update(format_id=2,payload_size=36)
+    periodic_imu['frames'][0].update(event=3,valid=0,sample_timestamp_us=1,sample_sequence=2,sample_valid=0)
+    assert flatten(periodic_imu)[2][0]['gyro_x_dps']==1
+
     # Exercise the actual GDB collector against typed value stand-ins.
     class Frames(list):
         @property
@@ -98,7 +116,7 @@ with tempfile.TemporaryDirectory(prefix='trace-tools-test-') as temporary:
                   session=1, total_written=200, duplicate_frames=0)
     def evaluate(expression):
         if expression == "'main.c'::lqr_trace":
-            return dict(recorder=dict(status=status), frames=frames)
+            return dict(recorder=dict(status=status,config=dict(frequency_hz=100)), frames=frames)
         if expression == "'lqr_app.c'::status.mode": return 0
         if expression.startswith(('(*','*')): return 0
         raise AssertionError(expression)
@@ -115,6 +133,13 @@ with tempfile.TemporaryDirectory(prefix='trace-tools-test-') as temporary:
         status.update(format_id=3,payload_size=72)
         for f in frames: f['data']['yaw_rate_scale']=.5
         assert module['collect_trace']('lqr')['frames'][0]['yaw_rate_scale']==.5
+        status.update(format_id=4,payload_size=84)
+        for f in frames:
+            f['data'].update(sample_timestamp_us=99,sample_sequence=7,sample_valid=f['header']['valid'])
+        periodic_capture=module['collect_trace']('lqr')
+        assert periodic_capture['nominal_sample_hz']==100
+        assert periodic_capture['frames'][-1]['sample_sequence']==7
+        assert 'error' in periodic_capture['frames'][-1]
         status['mode'] = 1
         try:
             module['collect_trace']('lqr')

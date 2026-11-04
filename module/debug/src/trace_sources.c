@@ -1,75 +1,50 @@
-#include "trace_sources.h"
-#include "lqr_app.h"
-#include "sensor_app.h"
-#include <string.h>
+#include "trace_adapters.h"
 
-/* 格式变化时同步更新 format_id 和导出工具。 */
-_Static_assert(sizeof(LqrTracePayload)==72,"LQR format 3 payload size");
-_Static_assert(sizeof(ImuTracePayload)==24,"IMU format 1 payload size");
-
-static bool lqr_snapshot(void *context, TraceBusinessStatus *b, void *payload, uint32_t capacity)
-{
-    (void)context;
-    if (capacity<sizeof(LqrTracePayload)) return false;
-    const LqrStatus *s=LqrApp_GetStatus();
-    const LqrSample *sample=LqrApp_GetSample();
-    *b=(TraceBusinessStatus){.mode=s->mode==LQR_RUNNING ? TRACE_BUSINESS_RUNNING :
-        s->mode==LQR_FAULT ? TRACE_BUSINESS_FAULT : TRACE_BUSINESS_STOPPED,
-        .has_sample=s->has_output,.valid=sample->valid,.faults=s->faults,
-        .timestamp_us=s->mode==LQR_RUNNING ? sample->timestamp_us : s->event_timestamp_us,
-        .sequence=sample->sequence};
-    /* 保持格式 3 的字段布局；载荷只描述最后一次成功输出，事件由 header 表达。 */
-    LqrTracePayload p={.input_timestamp_us=sample->state_source.timestamp_us,
-        .input_sequence=sample->state_source.sequence,
-        .dt_us=sample->dt_us,.age_us=sample->data_age_us,
-        .pitch_rate_scale=sample->tuning.pitch_rate_scale,.yaw_rate_scale=sample->tuning.yaw_rate_scale};
-    memcpy(p.error,sample->data.error,sizeof p.error);
-    memcpy(p.torque_nm,sample->data.requested_nm,sizeof p.torque_nm);
-    memcpy(p.duty,sample->data.duty,sizeof p.duty);
-    memcpy(p.relative_rpm,sample->relative_rpm,sizeof p.relative_rpm);
-    memcpy(payload,&p,sizeof p);
+_Static_assert(sizeof(LqrTracePayload)==84,"LQR format 4 payload size");
+_Static_assert(sizeof(ImuTracePayload)==36,"IMU format 2 payload size");
+typedef struct {
+    uint32_t source_id, format_id, frequency_hz;
+    TraceCheckSource check;
+    void (*prepare)(void *context);
+} TraceRegistration;
+static const TraceRegistration registrations[]={
+    {TRACE_SOURCE_LQR,4,200,LqrTrace_Check,LqrTrace_Prepare},
+    {TRACE_SOURCE_IMU,2,200,ImuTrace_Check,ImuTrace_Prepare}
+};
+static const TraceRegistration *find(uint32_t id) {
+    for (size_t i=0;i<sizeof registrations/sizeof registrations[0];++i)
+        if (registrations[i].source_id==id) return &registrations[i];
+    return NULL;
+}
+static bool init(Trace *trace,void *context,uint32_t id,void *source,size_t size,
+                 void *storage,size_t bytes,size_t frame_size,size_t offset,uint32_t capacity) {
+    const TraceRegistration *r=find(id);
+    TraceConfig c={.source_id=id,.format_id=r->format_id,.payload_size=size,
+        .source=source,.source_bytes=size,.frequency_hz=r->frequency_hz,.check_source=r->check,
+        .context=context,.storage=storage,.storage_bytes=bytes,.frame_size=frame_size,
+        .payload_offset=offset,.capacity=capacity};
+    return TraceApp_Init(trace,&c);
+}
+bool LqrTrace_Init(LqrTrace *t) {
+    return t && init(&t->recorder,t,TRACE_SOURCE_LQR,&t->source,sizeof t->source,
+        t->frames,sizeof t->frames,sizeof t->frames[0],offsetof(LqrTraceFrame,data),LQR_TRACE_CAPACITY);
+}
+bool ImuTrace_Init(ImuTrace *t) {
+    return t && init(&t->recorder,t,TRACE_SOURCE_IMU,&t->source,sizeof t->source,
+        t->frames,sizeof t->frames,sizeof t->frames[0],offsetof(ImuTraceFrame,data),IMU_TRACE_CAPACITY);
+}
+static bool prepare(Trace *t) {
+    if (!t || !t->initialized || (t->status.mode!=TRACE_ARMED && t->status.mode!=TRACE_RECORDING)) return false;
+    const TraceRegistration *r=find(t->config.source_id);
+    if (!r) return false;
+    r->prepare(t->config.context);
     return true;
 }
-static bool imu_snapshot(void *context, TraceBusinessStatus *b, void *payload, uint32_t capacity)
-{
-    (void)context;
-    if (capacity<sizeof(ImuTracePayload)) return false;
-    const ImuSample *s=SensorApp_GetSample();
-    const SensorStatus *health=SensorApp_GetStatus();
-    *b=(TraceBusinessStatus){.mode=health->ready ? TRACE_BUSINESS_RUNNING :
-        health->fail_read_count ? TRACE_BUSINESS_FAULT : TRACE_BUSINESS_STOPPED,
-        .has_sample=health->succ_read_count>0,.valid=s->valid,.sequence=s->sequence,
-        .timestamp_us=s->timestamp_us,.faults=health->ready ? 0 : health->bus_error};
-    /* 采样时间原样保留：它是软件读取开始时间，不是芯片内部采样时刻。 */
-    ImuTracePayload p; memcpy(p.accel,s->data.accel,sizeof p.accel);
-    memcpy(p.gyro,s->data.gyro,sizeof p.gyro); memcpy(payload,&p,sizeof p);
-    return true;
+void TraceSources_Poll(Trace *t,uint32_t now) { if (prepare(t)) TraceApp_Poll(t,now); }
+void TraceSources_Freeze(Trace *t,uint32_t now) { if (prepare(t)) TraceApp_Freeze(t,now); }
+bool LqrTrace_Read(const LqrTrace *t,uint32_t i,LqrTraceFrame *out) {
+    return t && TraceApp_Read(&t->recorder,i,out,sizeof *out);
 }
-bool LqrTrace_Init(LqrTrace *t)
-{
-    if (!t) return false;
-    TraceConfig c={.source_id=TRACE_SOURCE_LQR,.format_id=3,
-        .payload_size=sizeof(t->scratch),.read_snapshot=lqr_snapshot,
-        .storage=t->frames,.storage_bytes=sizeof(t->frames),
-        .frame_size=sizeof(t->frames[0]),.payload_offset=offsetof(LqrTraceFrame,data),
-        .capacity=LQR_TRACE_CAPACITY,.scratch=&t->scratch,.scratch_bytes=sizeof(t->scratch)};
-    return TraceApp_Init(&t->recorder,&c);
-}
-bool LqrTrace_Read(const LqrTrace *t, uint32_t index, LqrTraceFrame *out)
-{
-    return t && TraceApp_Read(&t->recorder,index,out,sizeof(*out));
-}
-bool ImuTrace_Init(ImuTrace *t)
-{
-    if (!t) return false;
-    TraceConfig c={.source_id=TRACE_SOURCE_IMU,.format_id=1,
-        .payload_size=sizeof(t->scratch),.read_snapshot=imu_snapshot,
-        .storage=t->frames,.storage_bytes=sizeof(t->frames),
-        .frame_size=sizeof(t->frames[0]),.payload_offset=offsetof(ImuTraceFrame,data),
-        .capacity=IMU_TRACE_CAPACITY,.scratch=&t->scratch,.scratch_bytes=sizeof(t->scratch)};
-    return TraceApp_Init(&t->recorder,&c);
-}
-bool ImuTrace_Read(const ImuTrace *t, uint32_t index, ImuTraceFrame *out)
-{
-    return t && TraceApp_Read(&t->recorder,index,out,sizeof(*out));
+bool ImuTrace_Read(const ImuTrace *t,uint32_t i,ImuTraceFrame *out) {
+    return t && TraceApp_Read(&t->recorder,i,out,sizeof *out);
 }

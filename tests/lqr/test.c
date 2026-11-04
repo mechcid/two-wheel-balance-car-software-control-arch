@@ -44,13 +44,13 @@ int main(int argc, char **argv) {
     trace=&lqr_trace.recorder;
     if (argc>1) {
         trace=&imu_trace.recorder; assert(TraceApp_Arm(trace));
-        TraceApp_Poll(trace,1); assert(TraceApp_GetStatus(trace)->mode==TRACE_ARMED);
+        TraceSources_Poll(trace,1); assert(TraceApp_GetStatus(trace)->mode==TRACE_ARMED);
         imu_health.ready=true; imu_health.succ_read_count=1;
         imu=(ImuSample){.valid=true,.sequence=9,.timestamp_us=100,.data={{1,2,3},{4,5,6}}};
-        TraceApp_Poll(trace,500);TraceApp_Poll(trace,600);
+        TraceSources_Poll(trace,500);TraceSources_Poll(trace,600);
         assert(TraceApp_GetStatus(trace)->count==1);
-        imu.valid=false;TraceApp_Poll(trace,700);
-        ImuTraceFrame f;assert(TraceApp_Read(trace,0,&f,sizeof f) && f.header.timestamp_us==100 && f.header.sequence==9);
+        imu.valid=false;TraceSources_Poll(trace,700);
+        ImuTraceFrame f;assert(TraceApp_Read(trace,0,&f,sizeof f) && f.header.timestamp_us==500 && f.header.sequence==1 && f.data.sample_timestamp_us==100 && f.data.sample_sequence==9);
         assert(f.data.accel[0]==1 && f.data.gyro[2]==6);
         assert(TraceApp_GetStatus(trace)->freeze_reason==TRACE_FREEZE_INVALID);
         puts("PASS: IMU polling adapter retains sample identity and freezes on invalid data");return 0;
@@ -157,7 +157,8 @@ int main(int argc, char **argv) {
     state.valid=false; poll(now);
     assert(ts->mode==TRACE_FROZEN && ts->count==1 && ts->freeze_reason==TRACE_FREEZE_FAULT);
     assert(TraceApp_Read(trace,0,&f,sizeof f) && f.header.faults==LQR_BAD_STATE && !f.header.valid);
-    LqrTracePayload zero={0}; assert(memcmp(&f.data,&zero,sizeof zero)==0);
+    assert(f.data.sample_valid==0);
+    assert(f.data.sample_sequence==LqrApp_GetSample()->sequence);
     DebugApp_Stop(now); frame(now); state.theta_dot_radps=.1f;
     assert(DebugApp_StartTrial(now,true)); now+=5000; frame(now); update(now);
     float soft=LqrApp_GetSample()->data.requested_nm[0];
@@ -173,13 +174,13 @@ int main(int argc, char **argv) {
     near(LqrApp_GetTuning().yaw_rate_scale,.5f);
     DebugApp_Stop(now); frame(now);
     assert(TraceApp_Arm(trace)); assert(DebugApp_StartHold(now));
-    TraceApp_Poll(trace,now);assert(TraceApp_GetStatus(trace)->mode==TRACE_ARMED);
+    TraceSources_Poll(trace,now);assert(TraceApp_GetStatus(trace)->mode==TRACE_ARMED);
     now+=5000;frame(now);motor.left.rpm=12;motor.right.rpm=34;
     TrajectoryApp_Poll(now); LqrApp_Poll(now);uint32_t output_time=LqrApp_GetSample()->timestamp_us;
     uint32_t output_seq=LqrApp_GetSample()->sequence;
     motor.left.rpm=99;motor.right.rpm=99;
-    TraceApp_Poll(trace,now+100);DebugApp_Stop(now+200);
-    assert(TraceApp_Read(trace,0,&f,sizeof f) && f.header.timestamp_us==output_time && f.header.sequence==output_seq);
+    TraceSources_Poll(trace,now+100);DebugApp_Stop(now+200);
+    assert(TraceApp_Read(trace,0,&f,sizeof f) && f.header.timestamp_us==now+100 && f.data.sample_timestamp_us==output_time && f.data.sample_sequence==output_seq);
     near(f.data.yaw_rate_scale,.5f); near(f.data.pitch_rate_scale,.5f);
     near(f.data.relative_rpm[0],12);near(f.data.relative_rpm[1],34);
     // Simultaneous real adapters: LQR fault freezes only LQR; IMU keeps recording.
@@ -192,13 +193,13 @@ int main(int argc, char **argv) {
     state.valid=false; poll(now);
     uint32_t frozen_count=trace->status.count;
     assert(trace->status.mode==TRACE_FROZEN && trace->status.freeze_reason==TRACE_FREEZE_FAULT);
-    ++imu.sequence; imu.timestamp_us=now+100; DebugApp_Poll(now+100);
+    ++imu.sequence; imu.timestamp_us=now+5000; DebugApp_Poll(now+5000);
     assert(imu_trace.recorder.status.count==2 && trace->status.count==frozen_count);
     DebugApp_Stop(now+200);
     assert(imu_trace.recorder.status.mode==TRACE_RECORDING);
-    TraceApp_Freeze(&imu_trace.recorder,now+300);
+    TraceSources_Freeze(&imu_trace.recorder,now+300);
     ImuTraceFrame imuf; assert(ImuTrace_Read(&imu_trace,1,&imuf));
-    assert(imuf.header.sequence==2 && imuf.data.gyro[2]==6);
+    assert(imuf.data.sample_sequence==2 && imuf.data.gyro[2]==6);
     assert(LqrTrace_Read(&lqr_trace,0,&f));
     // 成功输出完整保存两个输入来源；停止、重启和候选失败不改写历史样本。
     frame(now+500); assert(DebugApp_StartHold(now+500));

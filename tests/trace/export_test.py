@@ -30,18 +30,19 @@ class Debugger:
         self.commands.append(command)
 
 with tempfile.TemporaryDirectory() as directory:
-    for source, source_id, fmt, size in [('lqr', 1, 2, 68), ('lqr', 1, 3, 72), ('imu', 2, 1, 24)]:
+    for source, source_id, fmt, size in [('lqr', 1, 2, 68), ('lqr', 1, 3, 72), ('imu', 2, 1, 24), ('lqr', 1, 4, 84), ('imu', 2, 2, 36)]:
         status = dict(mode=2, source_id=source_id, format_id=fmt, payload_size=size,
                       count=3, write_index=1, session=4, freeze_reason=4,
                       total_written=8, duplicate_frames=2)
-        data = dict(input_timestamp_us=100, input_sequence=7, dt_us=5000, age_us=0,
+        periodic=(source_id,fmt) in ((1,4),(2,2))
+        data = dict(sample_timestamp_us=99,sample_sequence=7,sample_valid=0,input_timestamp_us=100, input_sequence=7, dt_us=5000, age_us=0,
                     error=[1]*6, torque_nm=[2, 3], duty=[.1, .2], relative_rpm=[4, 5],
                     pitch_rate_scale=.5, yaw_rate_scale=.5, accel=[1, 2, 3], gyro=[4, 5, 6])
         def frame(seq, valid):
             return dict(header=dict(timestamp_us=seq*5000, sequence=seq,
                                     business_mode=1, faults=0, event=0 if valid else 4,
                                     valid=valid), data=data)
-        instance = dict(recorder=dict(status=status), frames=Frames([frame(8, 0), frame(6, 1), frame(7, 1)]))
+        instance = dict(recorder=dict(status=status,config=dict(frequency_hz=100)), frames=Frames([frame(8, 0), frame(6, 1), frame(7, 1)]))
         debugger = Debugger(instance, source)
         output = Path(directory)/f'{source}_{fmt}.json'
         with patch.dict(os.environ, TRACE_SOURCE=source, LQR_TRACE_OUT=str(output)):
@@ -49,10 +50,16 @@ with tempfile.TemporaryDirectory() as directory:
             result = json.loads(output.read_text())
             assert result['schema_version'] == 3 and result['capacity'] == 3
             assert [f['sequence'] for f in result['frames']] == [6, 7, 8]
-            assert 'error' not in result['frames'][-1] and 'accel_g' not in result['frames'][-1]
+            if periodic:
+                assert result['nominal_sample_hz']==100
+                assert result['frames'][-1]['sample_sequence']==7
+                assert ('error' if source=='lqr' else 'accel_g') in result['frames'][-1]
+                assert 'duplicate_frames' not in result['status']
+            else:
+                assert 'error' not in result['frames'][-1] and 'accel_g' not in result['frames'][-1]
             if source == 'lqr':
                 assert result['frames'][0]['relative_rpm'] == [4, 5]
-                assert result['frames'][0]['yaw_rate_scale'] == (.5 if fmt==3 else 1.0)
+                assert result['frames'][0]['yaw_rate_scale'] == (.5 if fmt>=3 else 1.0)
             else:
                 assert result['frames'][0]['gyro_dps'] == [4, 5, 6]
             before = output.read_bytes()

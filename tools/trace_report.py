@@ -25,6 +25,8 @@ def flatten(document):
         raise ValueError('Unsupported source_id')
     arrays = LQR_ARRAYS if source == 1 else IMU_ARRAYS
     scalar = ['input_timestamp_us', 'input_sequence', 'dt_us', 'age_us', 'pitch_rate_scale', 'yaw_rate_scale'] if source == 1 else []
+    periodic=(source,document['status']['format_id']) in ((1,4),(2,2))
+    if periodic: scalar=['sample_timestamp_us','sample_sequence','sample_valid']+scalar
     fields = ['time_s', 'timestamp_us', 'sequence', 'business_mode', 'faults', 'event', 'event_name', 'valid'] + scalar
     fields += [name for names in arrays.values() for name in names]
     rows, elapsed, previous = [], 0, None
@@ -38,7 +40,7 @@ def flatten(document):
         previous = stamp
         row = {key: frame[key] for key in fields if key in frame}
         row.update(time_s=elapsed / 1e6, event_name=EVENTS.get(frame['event'], 'unknown'))
-        if frame['valid'] and frame['event'] == 0:
+        if periodic or (frame['valid'] and frame['event'] == 0):
             for key in scalar:
                 if key == 'yaw_rate_scale' and document['status'].get('format_id') == 2:
                     row[key] = frame.get(key, 1.0)  # Format 2 predates yaw-rate scaling.
@@ -46,7 +48,7 @@ def flatten(document):
                     row[key] = frame[key]
             for key, names in arrays.items():
                 values = frame[key]
-                if len(values) != len(names) or not all(math.isfinite(v) for v in values):
+                if len(values) != len(names) or (frame['valid'] and not all(v is not None and math.isfinite(v) for v in values)):
                     raise ValueError('Invalid measurement array: ' + key)
                 row.update(zip(names, values))
         else:

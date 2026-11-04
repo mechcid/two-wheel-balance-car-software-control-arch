@@ -46,18 +46,18 @@ static void restore_tuning(void)
 }
 void DebugApp_Stop(uint32_t now)
 {
-    TraceApp_Poll(lqr_trace,now); /* 在清除业务故障之前先保存异常现场。 */
+    TraceSources_Poll(lqr_trace,now); /* 在清除业务故障之前先保存异常现场。 */
     LqrApp_Stop(now); TrajectoryApp_Stop();
-    TraceApp_Poll(lqr_trace,now);
+    TraceSources_Poll(lqr_trace,now);
     restore_tuning();
 }
 void DebugApp_Poll(uint32_t now)
 {
     if (!initialized) return;
-    TraceApp_Poll(imu_trace,now);
-    TraceApp_Poll(lqr_trace,now);
+    TraceSources_Poll(imu_trace,now);
+    TraceSources_Poll(lqr_trace,now);
     if (trial_active && LqrApp_IsActive() && (uint32_t)(now-trial_started_us)>=DEBUG_LQR_TRIAL_DURATION_MS*1000U) {
-        LqrApp_Stop(now); TrajectoryApp_Stop(); TraceApp_Poll(lqr_trace,now);
+        LqrApp_Stop(now); TrajectoryApp_Stop(); TraceSources_Poll(lqr_trace,now);
     }
     restore_tuning();
 }
